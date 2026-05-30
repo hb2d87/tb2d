@@ -1,0 +1,32 @@
+name: web-reader
+gap: 2
+peek: 3
+presets:
+  small: 34
+  medium: 52
+  big: 76
+columns:
+  - name: editor
+    width: big
+    panes:
+      - name: editor
+        command: "${EDITOR:-vi}"
+  - name: agent
+    width: "55% min=42 max=72"
+    panes:
+      - name: shell
+        command: "${SHELL:-sh}"
+  - name: feedback
+    width: medium
+    panes:
+      - name: tests
+        command: "printf 'Run tests here\\n'; exec ${SHELL:-sh}"
+      - name: logs
+        command: "printf 'Tail logs here\\n'; exec ${SHELL:-sh}"
+  - name: services
+    width: small
+    panes:
+      - name: preview
+        command: "printf 'Start preview here\\n'; exec ${SHELL:-sh}"
+      - name: database
+        command: "printf 'Open database console here\\n'; exec ${SHELL:-sh}"
