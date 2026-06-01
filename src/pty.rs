@@ -20,6 +20,7 @@ struct PtyHandle {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
+    size: PtySize,
 }
 
 pub struct PtyManager {
@@ -34,9 +35,10 @@ impl PtyManager {
         Self { panes: HashMap::new(), tx, rx }
     }
 
-    pub fn spawn(&mut self, id: PaneId, command: &str) -> Result<()> {
+    pub fn spawn(&mut self, id: PaneId, command: &str, cols: u16, rows: u16) -> Result<()> {
+        let size = PtySize { rows: rows.max(1), cols: cols.max(1), pixel_width: 0, pixel_height: 0 };
         let pair = native_pty_system()
-            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .openpty(size)
             .context("failed to open PTY")?;
         let mut builder = CommandBuilder::new("sh");
         builder.arg("-lc");
@@ -49,7 +51,12 @@ impl PtyManager {
         let writer = pair.master.take_writer().context("failed to open PTY writer")?;
         let tx = self.tx.clone();
         thread::spawn(move || read_output(id, &mut reader, tx));
-        self.panes.insert(id, PtyHandle { master: pair.master, writer, child });
+        self.panes.insert(id, PtyHandle {
+            master: pair.master,
+            writer,
+            child,
+            size,
+        });
         Ok(())
     }
 
@@ -61,13 +68,37 @@ impl PtyManager {
         Ok(())
     }
 
-    pub fn resize(&self, id: PaneId, cols: u16, rows: u16) -> Result<()> {
-        if let Some(pane) = self.panes.get(&id) {
+    pub fn resize(&mut self, id: PaneId, cols: u16, rows: u16) -> Result<()> {
+        if let Some(pane) = self.panes.get_mut(&id) {
+            let size = PtySize {
+                rows: rows.max(1),
+                cols: cols.max(1),
+                pixel_width: 0,
+                pixel_height: 0,
+            };
+            if pane.size.rows == size.rows && pane.size.cols == size.cols {
+                return Ok(());
+            }
             pane.master
-                .resize(PtySize { rows: rows.max(1), cols: cols.max(1), pixel_width: 0, pixel_height: 0 })
+                .resize(size)
                 .context("failed to resize PTY")?;
+            pane.size = size;
         }
         Ok(())
+    }
+
+    pub fn swap(&mut self, left: PaneId, right: PaneId) {
+        if left == right {
+            return;
+        }
+        let left_pane = self.panes.remove(&left);
+        let right_pane = self.panes.remove(&right);
+        if let Some(pane) = left_pane {
+            self.panes.insert(right, pane);
+        }
+        if let Some(pane) = right_pane {
+            self.panes.insert(left, pane);
+        }
     }
 
     pub fn try_recv(&self) -> Option<PtyEvent> {
@@ -118,7 +149,7 @@ mod tests {
     #[test]
     fn spawns_command_and_captures_output() {
         let mut manager = PtyManager::new();
-        manager.spawn(7, "printf tb2d-pty-ok").unwrap();
+        manager.spawn(7, "printf tb2d-pty-ok", 80, 24).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
             if let Some(PtyEvent::Output(7, output)) = manager.try_recv() {
@@ -128,5 +159,13 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("PTY output was not received");
+    }
+
+    #[test]
+    fn caches_the_real_initial_pane_size() {
+        let mut manager = PtyManager::new();
+        manager.spawn(7, "sleep 1", 91, 37).unwrap();
+        let size = manager.panes[&7].size;
+        assert_eq!((size.cols, size.rows), (91, 37));
     }
 }

@@ -15,12 +15,23 @@ use std::{io::{self, Stdout}, time::Duration};
 
 pub fn run(app: &mut App) -> Result<()> {
     let mut terminal = TerminalGuard::new()?;
+    let mut started = false;
     while !app.should_quit {
-        app.drain_pty_events();
         let size = terminal.terminal.size()?;
-        let layout = Layout::calculate(&app.workspace, size.width, size.height.saturating_sub(1))?;
+        let layout = Layout::calculate_with_widths(
+            &app.workspace,
+            size.width,
+            size.height.saturating_sub(1),
+            &app.column_widths,
+        )?;
+        if !started {
+            app.start_panes(&layout)?;
+            started = true;
+        }
         app.reveal_focus(&layout);
+        app.animate_viewport(&layout);
         app.resize_panes(&layout);
+        app.drain_pty_events();
         terminal.terminal.draw(|frame| render::draw(frame, app, &layout))?;
 
         if !event::poll(Duration::from_millis(40))? {
@@ -31,12 +42,24 @@ pub fn run(app: &mut App) -> Result<()> {
                 match map_key(key) {
                     Action::Quit => app.should_quit = true,
                     Action::Move(direction) => app.move_focus(direction),
+                    Action::ResizeColumn(grow) => app.resize_focused_column(&layout, grow),
+                    Action::ResetColumnWidth => app.reset_focused_column_width(),
+                    Action::ScrollPane(direction) => app.scroll_focused_pane(direction),
+                    Action::ReorderPane(direction) => app.reorder_focused_pane(direction),
+                    Action::CyclePresentation => app.cycle_focused_presentation(),
+                    Action::CycleLayout => app.cycle_focused_layout(),
                     Action::Send(bytes) => app.send_input(&bytes)?,
                     Action::Ignore => {}
                 }
             }
             Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
                 app.focus_at(&layout, mouse.column, mouse.row);
+            }
+            Event::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollUp => {
+                app.scroll_focused_pane(crate::input::Direction::Up);
+            }
+            Event::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollDown => {
+                app.scroll_focused_pane(crate::input::Direction::Down);
             }
             Event::Resize(_, _) => {}
             _ => {}

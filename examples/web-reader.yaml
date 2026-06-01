@@ -1,4 +1,9 @@
 name: web-reader
+ui:
+  accent: light-magenta
+  muted: dark-gray
+  status_fg: white
+  status_bg: blue
 gap: 2
 peek: 3
 presets:
@@ -7,16 +12,19 @@ presets:
   big: 76
 columns:
   - name: editor
+    layout: fit
     width: big
     panes:
       - name: editor
         command: "${EDITOR:-vi}"
   - name: agent
+    layout: carousel
     width: "55% min=42 max=72"
     panes:
       - name: shell
         command: "${SHELL:-sh}"
   - name: feedback
+    layout: carousel
     width: medium
     panes:
       - name: tests
@@ -24,6 +32,7 @@ columns:
       - name: logs
         command: "printf 'Tail logs here\\n'; exec ${SHELL:-sh}"
   - name: services
+    layout: fit
     width: small
     panes:
       - name: preview

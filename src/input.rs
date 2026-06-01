@@ -12,6 +12,12 @@ pub enum Direction {
 pub enum Action {
     Quit,
     Move(Direction),
+    ResizeColumn(bool),
+    ResetColumnWidth,
+    ScrollPane(Direction),
+    ReorderPane(Direction),
+    CyclePresentation,
+    CycleLayout,
     Send(Vec<u8>),
     Ignore,
 }
@@ -21,6 +27,29 @@ pub fn map_key(event: KeyEvent) -> Action {
         return Action::Quit;
     }
     if event.modifiers.contains(KeyModifiers::ALT) {
+        match event.code {
+            KeyCode::Char('-') => return Action::ResizeColumn(false),
+            KeyCode::Char('=') | KeyCode::Char('+') => return Action::ResizeColumn(true),
+            KeyCode::Char('0') => return Action::ResetColumnWidth,
+            KeyCode::Char('w') => return Action::CyclePresentation,
+            KeyCode::Char('m') => return Action::CycleLayout,
+            KeyCode::PageUp => return Action::ScrollPane(Direction::Up),
+            KeyCode::PageDown => return Action::ScrollPane(Direction::Down),
+            _ => {}
+        }
+        if event.modifiers.contains(KeyModifiers::SHIFT) {
+            let direction = match event.code {
+                KeyCode::Char('h') | KeyCode::Left => Some(Direction::Left),
+                KeyCode::Char('l') | KeyCode::Right => Some(Direction::Right),
+                KeyCode::Char('k') | KeyCode::Up => Some(Direction::Up),
+                KeyCode::Char('j') | KeyCode::Down => Some(Direction::Down),
+                _ => None,
+            };
+            return direction.map(|direction| match direction {
+                Direction::Left | Direction::Right => Action::ScrollPane(direction),
+                Direction::Up | Direction::Down => Action::ReorderPane(direction),
+            }).unwrap_or(Action::Ignore);
+        }
         let direction = match event.code {
             KeyCode::Char('h') | KeyCode::Left => Some(Direction::Left),
             KeyCode::Char('l') | KeyCode::Right => Some(Direction::Right),
@@ -73,12 +102,44 @@ mod tests {
             Action::Move(Direction::Left)
         );
         assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)),
+            Action::Move(Direction::Left)
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)),
+            Action::Move(Direction::Right)
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)),
+            Action::Move(Direction::Up)
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)),
+            Action::Move(Direction::Down)
+        );
+        assert_eq!(
             map_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
             Action::Send(b"x".to_vec())
         );
         assert_eq!(
             map_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)),
             Action::Send(b"\x1bx".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::ALT)),
+            Action::ResizeColumn(true)
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT)),
+            Action::ResetColumnWidth
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::ALT)),
+            Action::ScrollPane(Direction::Up)
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT | KeyModifiers::SHIFT)),
+            Action::ReorderPane(Direction::Down)
         );
     }
 }

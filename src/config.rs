@@ -1,9 +1,11 @@
 use crate::error::Tb2dError;
 use anyhow::{Context, Result};
+use ratatui::style::Color;
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::{HashMap, HashSet}, fs, path::Path};
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Workspace {
     #[serde(default = "default_workspace_name")]
     pub name: String,
@@ -13,17 +15,103 @@ pub struct Workspace {
     pub peek: u16,
     #[serde(default)]
     pub presets: WidthPresets,
+    #[serde(default)]
+    pub ui: UiConfig,
     pub columns: Vec<ColumnConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ColumnConfig {
     pub name: String,
+    #[serde(default)]
+    pub layout: PaneLayoutMode,
     pub width: WidthPolicy,
     pub panes: Vec<PaneConfig>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaneLayoutMode {
+    Fit,
+    Tabs,
+    Carousel,
+}
+
+impl Default for PaneLayoutMode {
+    fn default() -> Self {
+        Self::Fit
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UiConfig {
+    pub accent: UiColor,
+    pub muted: UiColor,
+    pub status_fg: UiColor,
+    pub status_bg: UiColor,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            accent: UiColor::LightMagenta,
+            muted: UiColor::DarkGray,
+            status_fg: UiColor::White,
+            status_bg: UiColor::Blue,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UiColor {
+    Reset,
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    Gray,
+    DarkGray,
+    LightRed,
+    LightGreen,
+    LightYellow,
+    LightBlue,
+    LightMagenta,
+    LightCyan,
+    White,
+}
+
+impl UiColor {
+    pub fn to_color(self) -> Color {
+        match self {
+            Self::Reset => Color::Reset,
+            Self::Black => Color::Black,
+            Self::Red => Color::Red,
+            Self::Green => Color::Green,
+            Self::Yellow => Color::Yellow,
+            Self::Blue => Color::Blue,
+            Self::Magenta => Color::Magenta,
+            Self::Cyan => Color::Cyan,
+            Self::Gray => Color::Gray,
+            Self::DarkGray => Color::DarkGray,
+            Self::LightRed => Color::LightRed,
+            Self::LightGreen => Color::LightGreen,
+            Self::LightYellow => Color::LightYellow,
+            Self::LightBlue => Color::LightBlue,
+            Self::LightMagenta => Color::LightMagenta,
+            Self::LightCyan => Color::LightCyan,
+            Self::White => Color::White,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PaneConfig {
     pub name: String,
     #[serde(default = "default_command")]
@@ -58,6 +146,7 @@ impl Workspace {
         let source = fs::read_to_string(path)
             .with_context(|| format!("failed to read workspace {}", path.display()))?;
         Self::parse(&source)
+            .with_context(|| format!("failed to parse workspace {}", path.display()))
     }
 
     pub fn parse(source: &str) -> Result<Self> {
@@ -70,11 +159,37 @@ impl Workspace {
         if self.columns.is_empty() {
             return Err(Tb2dError::EmptyWorkspace.into());
         }
+        self.presets.validate()?;
+        let mut column_names = HashSet::new();
         for column in &self.columns {
+            if column.name.trim().is_empty() {
+                return Err(Tb2dError::EmptyColumnName.into());
+            }
+            if !column_names.insert(&column.name) {
+                return Err(Tb2dError::DuplicateColumn(column.name.clone()).into());
+            }
             if column.panes.is_empty() {
                 return Err(Tb2dError::EmptyColumn(column.name.clone()).into());
             }
             column.width.resolve(100, &self.presets)?;
+            let mut pane_names = HashSet::new();
+            for pane in &column.panes {
+                if pane.name.trim().is_empty() {
+                    return Err(Tb2dError::EmptyPaneName(column.name.clone()).into());
+                }
+                if !pane_names.insert(&pane.name) {
+                    return Err(Tb2dError::DuplicatePane {
+                        column: column.name.clone(),
+                        pane: pane.name.clone(),
+                    }.into());
+                }
+                if pane.command.trim().is_empty() {
+                    return Err(Tb2dError::EmptyCommand {
+                        column: column.name.clone(),
+                        pane: pane.name.clone(),
+                    }.into());
+                }
+            }
         }
         Ok(())
     }
@@ -84,7 +199,9 @@ impl WidthPolicy {
     pub fn parse(value: &str) -> Result<Self, Tb2dError> {
         let value = value.trim();
         if let Ok(cells) = value.parse::<u16>() {
-            return Ok(Self::Cells(cells));
+            return (cells > 0)
+                .then_some(Self::Cells(cells))
+                .ok_or_else(|| Tb2dError::InvalidWidth(value.to_owned()));
         }
         if !value.contains('%') {
             return Ok(Self::Preset(value.to_owned()));
@@ -107,8 +224,8 @@ impl WidthPolicy {
                 .parse::<u16>()
                 .map_err(|_| Tb2dError::InvalidWidth(value.to_owned()))?;
             match key {
-                "min" => min = Some(cells),
-                "max" => max = Some(cells),
+                "min" if min.is_none() && cells > 0 => min = Some(cells),
+                "max" if max.is_none() && cells > 0 => max = Some(cells),
                 _ => return Err(Tb2dError::InvalidWidth(value.to_owned())),
             }
         }
@@ -132,10 +249,12 @@ impl WidthPolicy {
                 if let Some(max) = max {
                     cells = cells.min(*max);
                 }
-                cells
+                cells.max(1)
             }
         };
-        Ok(cells.max(1))
+        (cells > 0)
+            .then_some(cells)
+            .ok_or_else(|| Tb2dError::InvalidWidth(format!("{self:?}")))
     }
 }
 
@@ -147,6 +266,19 @@ impl WidthPresets {
             "big" => Some(self.big),
             other => self.extra.get(other).copied(),
         }
+    }
+
+    fn validate(&self) -> Result<()> {
+        for (name, width) in [
+            ("small", self.small),
+            ("medium", self.medium),
+            ("big", self.big),
+        ].into_iter().chain(self.extra.iter().map(|(name, width)| (name.as_str(), *width))) {
+            if width == 0 {
+                return Err(Tb2dError::ZeroPreset(name.to_owned()).into());
+            }
+        }
+        Ok(())
     }
 }
 
@@ -178,9 +310,11 @@ impl<'de> Deserialize<'de> for WidthPolicy {
             where
                 E: de::Error,
             {
-                u16::try_from(value)
-                    .map(WidthPolicy::Cells)
-                    .map_err(|_| E::custom("width cell count is too large"))
+                let width = u16::try_from(value)
+                    .map_err(|_| E::custom("width cell count is too large"))?;
+                (width > 0)
+                    .then_some(WidthPolicy::Cells(width))
+                    .ok_or_else(|| E::custom("width cell count must be greater than zero"))
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -222,12 +356,15 @@ mod tests {
         assert_eq!(WidthPolicy::Preset("medium".into()).resolve(120, &presets).unwrap(), 56);
         assert_eq!(WidthPolicy::parse("50% min=30 max=90").unwrap().resolve(10, &presets).unwrap(), 30);
         assert_eq!(WidthPolicy::parse("50% min=30 max=90").unwrap().resolve(240, &presets).unwrap(), 90);
+        assert_eq!(WidthPolicy::parse("1%").unwrap().resolve(20, &presets).unwrap(), 1);
     }
 
     #[test]
     fn rejects_invalid_percentage() {
         assert!(WidthPolicy::parse("101%").is_err());
         assert!(WidthPolicy::parse("50% min=90 max=30").is_err());
+        assert!(WidthPolicy::parse("50% min=20 min=30").is_err());
+        assert!(WidthPolicy::parse("0").is_err());
     }
 
     #[test]
@@ -238,11 +375,43 @@ mod tests {
         assert_eq!(workspace.gap, 2);
         assert_eq!(workspace.peek, 3);
         assert_eq!(workspace.columns[0].width, WidthPolicy::Preset("medium".into()));
+        assert_eq!(workspace.columns[0].layout, PaneLayoutMode::Fit);
+        assert_eq!(workspace.ui.accent, UiColor::LightMagenta);
+    }
+
+    #[test]
+    fn parses_explicit_ui_and_carousel_layout() {
+        let workspace = Workspace::parse(
+            "ui:\n  accent: light-magenta\n  muted: dark-gray\n  status_fg: white\n  status_bg: blue\ncolumns:\n  - name: editor\n    layout: carousel\n    width: medium\n    panes:\n      - name: shell\n        command: echo hi\n",
+        ).unwrap();
+        assert_eq!(workspace.ui.accent, UiColor::LightMagenta);
+        assert_eq!(workspace.ui.status_bg, UiColor::Blue);
+        assert_eq!(workspace.columns[0].layout, PaneLayoutMode::Carousel);
     }
 
     #[test]
     fn rejects_empty_columns() {
         assert!(Workspace::parse("columns: []").is_err());
         assert!(Workspace::parse("columns:\n  - name: bad\n    width: 40\n    panes: []").is_err());
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_empty_workspace_values() {
+        assert!(Workspace::parse(
+            "columns:\n  - name: one\n    width: 0\n    panes:\n      - name: shell\n",
+        ).is_err());
+        assert!(Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: shell\n        command: ''\n",
+        ).is_err());
+        assert!(Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: shell\n  - name: one\n    width: 40\n    panes:\n      - name: shell\n",
+        ).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_workspace_fields() {
+        assert!(Workspace::parse(
+            "unexpected: true\ncolumns:\n  - name: one\n    width: 40\n    panes:\n      - name: shell\n",
+        ).is_err());
     }
 }
