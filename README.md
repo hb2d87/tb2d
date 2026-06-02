@@ -47,24 +47,47 @@ Later, restore that session and its remembered template with:
 tb2d --session main
 ```
 
-Use `Alt+h/j/k/l` or `Alt+Arrow` to change focus, click a pane to focus it,
-and press `Ctrl+q` to exit. The viewport eases into focus changes instead of
-jumping abruptly. Use `Alt+-` and `Alt+=` to resize the focused column, or
-`Alt+0` to return it to its configured width. The template, focus, viewport
-offset, and column width overrides are saved under the platform state
-directory in `tb2d/<session>.json`.
+## Controls
+
+Use `Alt+h/j/k/l` or `Alt+Arrow` to change focus, and click a pane to focus it.
+The viewport eases into focus changes instead of jumping abruptly. Press
+`Ctrl+q` to exit.
+
+Column controls:
+
+- `Alt+h/l` or `Alt+Left/Right` moves between columns.
+- `Alt+-` and `Alt+=` resize the focused column.
+- `Alt+0` returns the focused column to its configured width.
+- `Alt+m` cycles `fit`, `tabs`, and `carousel` layouts for the focused column.
 
 Pane controls:
 
-- `Alt+PageUp` / `Alt+PageDown` or the mouse wheel scroll the focused pane vertically.
-- `Alt+Shift+h/l` or `Alt+Shift+Left/Right` scroll it horizontally.
+- `Alt+j/k` or `Alt+Down/Up` moves between panes in the focused column.
+- `Alt+PageUp` / `Alt+PageDown` or the mouse wheel scrolls the focused pane vertically.
+- `Alt+Shift+h/l`, `Alt+Shift+Left/Right`, or horizontal wheel events scroll it horizontally.
 - `Alt+w` cycles `symbols`, `words`, and `horizontal` content presentation.
 - `Alt+Shift+k/j` or `Alt+Shift+Up/Down` reorders the focused pane within its column.
-- `Alt+m` cycles `fit`, `tabs`, and `carousel` layouts for the focused column.
 
-`fit` is a vertical stack. `tabs` shows one pane with a `1-2-3` style tab row.
-`carousel` shows the selected pane with compact neighboring previews. Carousel
-selection is remembered independently for each column.
+`fit` is a vertical stack. `tabs` shows only the selected pane. `carousel`
+shows the selected pane with compact neighboring previews. Pane selection is
+remembered independently for each column.
+
+## Sessions and diagnostics
+
+When you run with `--session`, TB2D autosaves every 5 seconds and once more on
+exit. The saved session remembers the template path, focus, viewport offset,
+column width overrides, selected pane per column, and pane scroll positions.
+
+Session state is written under the platform state directory as
+`tb2d/<session>.json`. Runtime diagnostics are written next to it as
+`tb2d/<session>.diagnostics.jsonl`. On most Linux systems, the default session
+diagnostics file is `~/.local/state/tb2d/main.diagnostics.jsonl`.
+
+Diagnostics are newline-delimited JSON records. They include session
+start/stop breadcrumbs, workspace load failures, terminal event read/poll
+errors, autosave failures, scroll bursts, frame event caps, and panic
+backtraces. If the UI disappears without an obvious terminal error, check this
+file first.
 
 ## Release archives
 
@@ -78,19 +101,31 @@ tar -xzf tb2d-vX.Y.Z-linux-x86_64.tar.gz
 ## Workspace YAML
 
 Each column has a name, width, optional `fit`, `tabs`, or `carousel` layout,
-and one or more panes. Widths support cell
-counts, the `small`, `medium`, and `big` presets, custom presets, and
-percentages with optional clamps such as `"55% min=42 max=72"`.
+and one or more panes. Widths support cell counts, the `small`, `medium`, and
+`big` presets, custom presets, and percentages with optional clamps such as
+`"55% min=42 max=72"`.
+
+Set `wrap_columns: true` to let an additional horizontal move at the first or
+last column wrap to the opposite edge. Without it, horizontal navigation stops
+at the edge.
+
+The `ui.selection_bg` color is used for the selected pane border and selected
+pane title background. The `ui.selection_fg` color is used for selected pane
+title text. This keeps the focused pane visible without changing terminal
+content colors inside the pane.
 
 ```yaml
 name: demo
 ui:
   accent: light-cyan
   muted: dark-gray
+  selection_fg: black
+  selection_bg: white
   status_fg: black
   status_bg: cyan
 gap: 2
 peek: 3
+wrap_columns: true
 columns:
   - name: editor
     layout: carousel

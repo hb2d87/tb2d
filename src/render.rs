@@ -1,9 +1,12 @@
-use crate::{app::{pane_id, App, PresentationMode}, layout::Layout};
+use crate::{
+    app::{pane_id, App, PresentationMode, MAX_HORIZONTAL_SCROLL},
+    layout::Layout,
+};
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 
@@ -21,18 +24,19 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &Layout) {
             }
             let focused = app.focus.column == column.index && app.focus.pane == pane_index;
             let pane = &app.panes[&pane_id(column.index, pane_index)];
-            let border = if focused { ui.accent.to_color() } else { ui.muted.to_color() };
+            let border = if focused { ui.selection_bg.to_color() } else { ui.muted.to_color() };
             let title = pane_title(app, column.index, pane_index, pane.exited);
             let block = Block::default()
                 .title(title)
-                .title_bottom(pane_tabs(app, column.index, app.pane_selections[column.index]))
                 .borders(Borders::ALL)
+                .border_type(if focused { BorderType::Thick } else { BorderType::Plain })
                 .border_style(Style::default().fg(border).add_modifier(
                     if focused { Modifier::BOLD } else { Modifier::empty() },
                 ));
             let visible_lines = screen_rect.height.saturating_sub(2);
             let clipped_left = app.viewport.offset.saturating_sub(canvas_rect.x);
             let content_start = clipped_left.saturating_sub(1).saturating_add(pane.view.horizontal);
+            let show_scrollbars = focused && !app.is_collapsed_carousel_pane(column.index, pane_index);
             let content_width = screen_rect.width.saturating_sub(2);
             let paragraph = if app.is_collapsed_carousel_pane(column.index, pane_index) {
                 Paragraph::new(pane_history(app, column.index)).block(block)
@@ -51,62 +55,33 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &Layout) {
                 paragraph
             };
             frame.render_widget(paragraph, screen_rect);
+            if show_scrollbars {
+                draw_pane_scrollbars(frame, app, pane, screen_rect, visible_lines, content_width);
+            }
         }
     }
 
-    draw_minimap(frame, app, layout);
+    draw_footer(frame, app, layout);
 }
 
 fn pane_title(app: &App, column_index: usize, pane_index: usize, exited: bool) -> Line<'static> {
     let ui = &app.workspace.ui;
     let column = &app.workspace.columns[column_index];
     let pane = &column.panes[pane_index];
-    let runtime = &app.panes[&pane_id(column_index, pane_index)];
-    let primary = if app.focus.column == column_index && app.focus.pane == pane_index {
-        ui.accent.to_color()
+    let focused = app.focus.column == column_index && app.focus.pane == pane_index;
+    let title = if column.panes.len() == 1 { &column.name } else { &pane.name };
+    let title_style = if focused {
+        Style::default()
+            .fg(ui.selection_fg.to_color())
+            .bg(ui.selection_bg.to_color())
+            .add_modifier(Modifier::BOLD)
     } else {
-        ui.muted.to_color()
+        Style::default().fg(ui.muted.to_color()).add_modifier(Modifier::BOLD)
     };
-    let mut spans = vec![
-        Span::styled(" ", Style::default()),
-        Span::styled(pane.name.clone(), Style::default().fg(primary).add_modifier(Modifier::BOLD)),
-    ];
+    let mut spans = vec![Span::styled(format!(" {title} "), title_style)];
     if exited {
         spans.push(Span::styled(" [exited]", Style::default().fg(Color::Yellow)));
     }
-    spans.push(Span::styled(
-        format!(
-            "  {}{}{} ",
-            runtime.view.presentation.label(),
-            if runtime.view.vertical > 0 { " up" } else { "" },
-            if runtime.view.horizontal > 0 { " x" } else { "" },
-        ),
-        Style::default().fg(ui.muted.to_color()),
-    ));
-    Line::from(spans)
-}
-
-fn pane_tabs(app: &App, column_index: usize, selected: usize) -> Line<'static> {
-    let ui = &app.workspace.ui;
-    let spans = app.workspace.columns[column_index]
-        .panes
-        .iter()
-        .enumerate()
-        .map(|(index, pane)| {
-            let active = index == selected;
-            Span::styled(
-                format!(" --{}:{}-- ", index + 1, pane.name),
-                if active {
-                    Style::default()
-                        .fg(ui.status_fg.to_color())
-                        .bg(ui.accent.to_color())
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(ui.muted.to_color())
-                },
-            )
-        })
-        .collect::<Vec<_>>();
     Line::from(spans)
 }
 
@@ -120,9 +95,9 @@ fn pane_history(app: &App, column_index: usize) -> Line<'static> {
             let active = index == app.pane_selections[column_index];
             [
                 Span::styled(
-                    if active { "❙" } else { "|" },
+                    if active { "┃" } else { "│" },
                     Style::default()
-                        .fg(if active { ui.accent.to_color() } else { ui.muted.to_color() })
+                        .fg(if active { ui.selection_bg.to_color() } else { ui.muted.to_color() })
                         .add_modifier(if active { Modifier::BOLD } else { Modifier::empty() }),
                 ),
                 Span::raw(" "),
@@ -130,6 +105,87 @@ fn pane_history(app: &App, column_index: usize) -> Line<'static> {
         })
         .collect::<Vec<_>>();
     Line::from(spans)
+}
+
+fn draw_pane_scrollbars(
+    frame: &mut Frame,
+    app: &App,
+    pane: &crate::app::PaneRuntime,
+    area: Rect,
+    visible_lines: u16,
+    content_width: u16,
+) {
+    if area.width < 4 || area.height < 4 {
+        return;
+    }
+    let ui = &app.workspace.ui;
+    let thumb = Style::default()
+        .fg(ui.accent.to_color())
+        .add_modifier(Modifier::BOLD);
+    let vertical_x = area.x + area.width - 1;
+    let vertical_y = area.y + 1;
+    let vertical_len = area.height.saturating_sub(2);
+    draw_thumb(
+        frame,
+        vertical_x,
+        vertical_y,
+        0,
+        1,
+        vertical_len,
+        "┃",
+        thumb,
+        pane.scrollback_max.saturating_add(visible_lines as usize),
+        visible_lines as usize,
+        pane.scrollback_max.saturating_sub(pane.view.vertical),
+    );
+
+    let horizontal_x = area.x + 1;
+    let horizontal_y = area.y + area.height - 1;
+    let horizontal_len = area.width.saturating_sub(2);
+    draw_thumb(
+        frame,
+        horizontal_x,
+        horizontal_y,
+        1,
+        0,
+        horizontal_len,
+        "━",
+        thumb,
+        MAX_HORIZONTAL_SCROLL as usize + content_width as usize,
+        content_width as usize,
+        pane.view.horizontal as usize,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_thumb(
+    frame: &mut Frame,
+    x: u16,
+    y: u16,
+    dx: u16,
+    dy: u16,
+    track_len: u16,
+    symbol: &str,
+    style: Style,
+    content_len: usize,
+    viewport_len: usize,
+    position: usize,
+) {
+    if track_len == 0 || content_len <= viewport_len {
+        return;
+    }
+    let track_len = track_len as usize;
+    let max_position = content_len.saturating_sub(viewport_len).max(1);
+    let thumb_len = ((track_len * viewport_len) / content_len).clamp(1, track_len);
+    let max_start = track_len.saturating_sub(thumb_len);
+    let start = (position.min(max_position) * max_start) / max_position;
+    for offset in start..start + thumb_len {
+        let cell_x = x.saturating_add(dx.saturating_mul(offset as u16));
+        let cell_y = y.saturating_add(dy.saturating_mul(offset as u16));
+        if let Some(cell) = frame.buffer_mut().cell_mut((cell_x, cell_y)) {
+            cell.set_symbol(symbol).set_style(style);
+        }
+    }
 }
 
 fn terminal_lines(
@@ -193,19 +249,21 @@ fn terminal_color(color: vt100::Color) -> Color {
     }
 }
 
-fn draw_minimap(frame: &mut Frame, app: &App, layout: &Layout) {
+fn draw_footer(frame: &mut Frame, app: &App, layout: &Layout) {
     let area = frame.area();
     if area.height == 0 {
         return;
     }
-    let ratio = if layout.canvas_width == 0 {
-        1.0
-    } else {
-        layout.viewport_width.min(layout.canvas_width) as f64 / layout.canvas_width as f64
-    };
     let ui = &app.workspace.ui;
-    let label = format!(
-        " {} | {} / {} | {} | view {}-{}/{} | Alt+m layout Alt+w wrap Ctrl-q exit ",
+    if area.height >= 2 {
+        frame.render_widget(
+            Paragraph::new(column_navigation(app))
+                .style(Style::default().fg(ui.status_fg.to_color())),
+            Rect::new(0, area.height - 2, area.width, 1),
+        );
+    }
+    let info = format!(
+        " {} | {} / {} | {} | view {}-{}/{} | Alt+h/l move Alt+m layout Ctrl-q exit ",
         app.workspace.name,
         app.workspace.columns[app.focus.column].name,
         app.workspace.columns[app.focus.column].panes[app.focus.pane].name,
@@ -215,12 +273,29 @@ fn draw_minimap(frame: &mut Frame, app: &App, layout: &Layout) {
         layout.canvas_width,
     );
     frame.render_widget(
-        Gauge::default()
-            .gauge_style(Style::default().fg(ui.status_fg.to_color()).bg(ui.status_bg.to_color()))
-            .ratio(ratio)
-            .label(Span::styled(label, Style::default().fg(ui.status_fg.to_color()).bg(ui.status_bg.to_color()))),
+        Paragraph::new(info)
+            .style(Style::default().fg(ui.status_fg.to_color())),
         Rect::new(0, area.height - 1, area.width, 1),
     );
+}
+
+fn column_navigation(app: &App) -> Line<'static> {
+    let ui = &app.workspace.ui;
+    let mut spans = vec![Span::raw(" ")];
+    for (index, column) in app.workspace.columns.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" - ", Style::default().fg(ui.muted.to_color())));
+        }
+        let style = if index == app.focus.column {
+            Style::default()
+                .fg(ui.selection_bg.to_color())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(ui.status_fg.to_color())
+        };
+        spans.push(Span::styled(format!(" {} ", column.name), style));
+    }
+    Line::from(spans)
 }
 
 #[cfg(test)]
@@ -260,13 +335,23 @@ mod tests {
     }
 
     #[test]
-    fn pane_tabs_have_compact_delimiters_and_character_indexes() {
+    fn pane_titles_show_only_the_pane_name_when_a_column_has_multiple_panes() {
         let workspace = Workspace::parse(
             "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: alpha\n      - name: beta\n",
         )
         .unwrap();
         let app = App::new(workspace, Default::default()).unwrap();
-        assert_eq!(pane_tabs(&app, 0, 1).to_string(), " --1:alpha--  --2:beta-- ");
+        assert_eq!(pane_title(&app, 0, 1, false).to_string(), " beta ");
+    }
+
+    #[test]
+    fn pane_titles_use_the_column_name_when_the_pane_is_alone() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: editor\n    width: 40\n    panes:\n      - name: shell\n",
+        )
+        .unwrap();
+        let app = App::new(workspace, Default::default()).unwrap();
+        assert_eq!(pane_title(&app, 0, 0, false).to_string(), " editor ");
     }
 
     #[test]
@@ -277,6 +362,16 @@ mod tests {
         .unwrap();
         let mut app = App::new(workspace, Default::default()).unwrap();
         app.pane_selections[0] = 1;
-        assert_eq!(pane_history(&app, 0).to_string(), "| ❙ | ");
+        assert_eq!(pane_history(&app, 0).to_string(), "│ ┃ │ ");
+    }
+
+    #[test]
+    fn footer_navigation_lists_columns_and_highlights_the_selected_one() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: editor\n    width: 40\n    panes:\n      - name: shell\n  - name: agent\n    width: 40\n    panes:\n      - name: shell\n",
+        )
+        .unwrap();
+        let app = App::new(workspace, Default::default()).unwrap();
+        assert_eq!(column_navigation(&app).to_string(), "  editor  -  agent ");
     }
 }

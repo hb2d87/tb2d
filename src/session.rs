@@ -4,6 +4,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::{
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
@@ -44,6 +45,20 @@ impl SessionStore {
         Self { path }
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn diagnostics_path(&self) -> PathBuf {
+        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
+        let stem = self
+            .path
+            .file_stem()
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| "session".into());
+        parent.join(format!("{stem}.diagnostics.jsonl"))
+    }
+
     pub fn load(&self) -> Result<SessionState> {
         if !self.path.exists() {
             return Ok(SessionState::default());
@@ -72,6 +87,29 @@ impl SessionStore {
         Ok(())
     }
 
+    pub fn append_diagnostic(&self, event: &str, fields: &[(&str, Value)]) -> Result<()> {
+        let path = self.diagnostics_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let mut record = Map::new();
+        record.insert("ts_unix_ms".to_owned(), Value::from(unix_millis()));
+        record.insert("event".to_owned(), Value::from(event));
+        for (key, value) in fields {
+            record.insert((*key).to_owned(), value.clone());
+        }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .with_context(|| format!("failed to open diagnostics log {}", path.display()))?;
+        serde_json::to_writer(&mut file, &Value::Object(record))?;
+        file.write_all(b"\n")
+            .with_context(|| format!("failed to write diagnostics log {}", path.display()))?;
+        Ok(())
+    }
+
     fn open_temporary_file(&self) -> Result<(PathBuf, std::fs::File)> {
         let mut attempt = 0_u32;
         loop {
@@ -87,6 +125,13 @@ impl SessionStore {
             }
         }
     }
+}
+
+fn unix_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or_default()
 }
 
 fn deserialize_column_widths<'de, D>(deserializer: D) -> std::result::Result<Vec<Option<u16>>, D::Error>
@@ -164,6 +209,24 @@ mod tests {
         store.save(&expected).unwrap();
         assert_eq!(store.load().unwrap(), expected);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn appends_jsonl_diagnostics_next_to_session() {
+        let path = std::env::temp_dir().join(format!("tb2d-diagnostics-{}.json", std::process::id()));
+        let store = SessionStore::at(path.clone());
+        let diagnostics = store.diagnostics_path();
+        let _ = fs::remove_file(&diagnostics);
+
+        store
+            .append_diagnostic("test-event", &[("answer", Value::from(42))])
+            .unwrap();
+
+        let log = fs::read_to_string(&diagnostics).unwrap();
+        assert!(log.contains(r#""event":"test-event""#));
+        assert!(log.contains(r#""answer":42"#));
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(diagnostics);
     }
 
     #[test]

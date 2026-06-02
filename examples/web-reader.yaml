@@ -2,10 +2,13 @@ name: web-reader
 ui:
   accent: light-magenta
   muted: dark-gray
+  selection_fg: black
+  selection_bg: white
   status_fg: white
   status_bg: blue
 gap: 2
 peek: 3
+wrap_columns: true
 presets:
   small: 34
   medium: 52

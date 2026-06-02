@@ -12,9 +12,11 @@ use std::{collections::HashMap, path::PathBuf};
 use tracing::warn;
 
 const SCROLLBACK_LINES: usize = 1_000;
-const MAX_HORIZONTAL_SCROLL: u16 = 512;
+pub const MAX_HORIZONTAL_SCROLL: u16 = 512;
 const MIN_COLUMN_WIDTH: u16 = 12;
 const COLUMN_RESIZE_STEP: u16 = 4;
+const VERTICAL_SCROLL_STEP: usize = 3;
+const HORIZONTAL_SCROLL_STEP: u16 = 4;
 
 pub struct PaneRuntime {
     pub id: PaneId,
@@ -23,6 +25,7 @@ pub struct PaneRuntime {
     pub terminal: vt100::Parser,
     pub exited: bool,
     pub view: PaneViewState,
+    pub scrollback_max: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +125,7 @@ impl App {
                     terminal: vt100::Parser::new(rows, cols, SCROLLBACK_LINES),
                     exited: false,
                     view: self.restored_pane_views[column_index][pane_index],
+                    scrollback_max: 0,
                 });
             }
         }
@@ -189,6 +193,7 @@ impl App {
                     let id = self.event_routes.get(&id).copied().unwrap_or(id);
                     if let Some(pane) = self.panes.get_mut(&id) {
                         pane.terminal.process(&bytes);
+                        refresh_scrollback(pane);
                     }
                 }
                 PtyEvent::Exited(id) => {
@@ -205,11 +210,21 @@ impl App {
     pub fn move_focus(&mut self, direction: Direction) {
         match direction {
             Direction::Left => {
-                self.focus.column = self.focus.column.saturating_sub(1);
+                self.focus.column = if self.workspace.wrap_columns && self.focus.column == 0 {
+                    self.workspace.columns.len() - 1
+                } else {
+                    self.focus.column.saturating_sub(1)
+                };
                 self.focus.pane = self.pane_selections[self.focus.column];
             }
             Direction::Right => {
-                self.focus.column = (self.focus.column + 1).min(self.workspace.columns.len() - 1);
+                self.focus.column = if self.workspace.wrap_columns
+                    && self.focus.column + 1 == self.workspace.columns.len()
+                {
+                    0
+                } else {
+                    (self.focus.column + 1).min(self.workspace.columns.len() - 1)
+                };
                 self.focus.pane = self.pane_selections[self.focus.column];
             }
             Direction::Up => {
@@ -275,26 +290,55 @@ impl App {
     }
 
     pub fn scroll_focused_pane(&mut self, direction: Direction) {
+        self.scroll_focused_pane_by(direction, 1);
+    }
+
+    pub fn scroll_focused_pane_by(&mut self, direction: Direction, steps: usize) {
+        if steps == 0 {
+            return;
+        }
         let pane = self.panes.get_mut(&self.focused_pane_id());
         let Some(pane) = pane else { return };
+        let scrollback_max = pane.scrollback_max.min(visible_row_limit(pane));
+        pane.scrollback_max = scrollback_max;
         match direction {
-            Direction::Up => pane.view.vertical = pane.view.vertical.saturating_add(3),
-            Direction::Down => pane.view.vertical = pane.view.vertical.saturating_sub(3),
+            Direction::Up => {
+                pane.view.vertical = pane
+                    .view
+                    .vertical
+                    .saturating_add(VERTICAL_SCROLL_STEP.saturating_mul(steps))
+                    .min(scrollback_max);
+            }
+            Direction::Down => {
+                pane.view.vertical = pane
+                    .view
+                    .vertical
+                    .saturating_sub(VERTICAL_SCROLL_STEP.saturating_mul(steps));
+            }
             Direction::Left => {
                 pane.view.presentation = PresentationMode::Horizontal;
-                pane.view.horizontal = pane.view.horizontal.saturating_sub(4);
+                pane.view.horizontal = pane
+                    .view
+                    .horizontal
+                    .saturating_sub(
+                        HORIZONTAL_SCROLL_STEP.saturating_mul(steps.min(u16::MAX as usize) as u16),
+                    );
             }
             Direction::Right => {
                 pane.view.presentation = PresentationMode::Horizontal;
                 pane.view.horizontal = pane
                     .view
                     .horizontal
-                    .saturating_add(4)
+                    .saturating_add(
+                        HORIZONTAL_SCROLL_STEP.saturating_mul(steps.min(u16::MAX as usize) as u16),
+                    )
                     .min(MAX_HORIZONTAL_SCROLL);
             }
         }
+        pane.view.vertical = pane.view.vertical.min(scrollback_max);
         pane.terminal.set_scrollback(pane.view.vertical);
-        pane.view.vertical = pane.terminal.screen().scrollback();
+        pane.view.vertical = pane.terminal.screen().scrollback().min(scrollback_max);
+        pane.terminal.set_scrollback(pane.view.vertical);
     }
 
     pub fn cycle_focused_presentation(&mut self) {
@@ -376,6 +420,7 @@ impl App {
                 if let Some(pane) = self.panes.get_mut(&id) {
                     if pane.terminal.screen().size() != (rows, cols) {
                         pane.terminal.set_size(rows, cols);
+                        refresh_scrollback(pane);
                     }
                 }
             }
@@ -405,6 +450,24 @@ fn animate_towards(current: u16, target: u16) -> u16 {
     } else {
         current.saturating_sub(step).max(target)
     }
+}
+
+fn refresh_scrollback(pane: &mut PaneRuntime) {
+    let vertical = pane.view.vertical;
+    pane.terminal.set_scrollback(usize::MAX);
+    // vt100 can store deeper history than Screen::cell can render safely from;
+    // keep the live offset inside the visible-row window to avoid Grid underflow.
+    pane.scrollback_max = pane
+        .terminal
+        .screen()
+        .scrollback()
+        .min(visible_row_limit(pane));
+    pane.view.vertical = vertical.min(pane.scrollback_max);
+    pane.terminal.set_scrollback(pane.view.vertical);
+}
+
+fn visible_row_limit(pane: &PaneRuntime) -> usize {
+    usize::from(pane.terminal.screen().size().0)
 }
 
 pub fn pane_id(column: usize, pane: usize) -> PaneId {
@@ -566,6 +629,37 @@ mod tests {
     }
 
     #[test]
+    fn optionally_wraps_horizontal_navigation_only_after_reaching_an_edge() {
+        let workspace = Workspace::parse(
+            "wrap_columns: true\ncolumns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n  - name: two\n    width: 40\n    panes:\n      - name: b\n  - name: three\n    width: 40\n    panes:\n      - name: c\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        app.move_focus(Direction::Right);
+        assert_eq!(app.focus.column, 1);
+        app.move_focus(Direction::Right);
+        assert_eq!(app.focus.column, 2);
+        app.move_focus(Direction::Right);
+        assert_eq!(app.focus.column, 0);
+        app.move_focus(Direction::Left);
+        assert_eq!(app.focus.column, 2);
+    }
+
+    #[test]
+    fn horizontal_navigation_stops_at_edges_when_wrapping_is_disabled() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n  - name: two\n    width: 40\n    panes:\n      - name: b\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        app.move_focus(Direction::Left);
+        assert_eq!(app.focus.column, 0);
+        app.move_focus(Direction::Right);
+        app.move_focus(Direction::Right);
+        assert_eq!(app.focus.column, 1);
+    }
+
+    #[test]
     fn carousel_navigation_wraps_between_the_first_and_last_panes() {
         let workspace = Workspace::parse(
             "columns:\n  - name: one\n    layout: carousel\n    width: 40\n    panes:\n      - name: a\n      - name: b\n      - name: c\n",
@@ -608,6 +702,7 @@ mod tests {
             terminal,
             exited: false,
             view: PaneViewState::default(),
+            scrollback_max: 0,
         });
         app.event_routes.insert(pane_id(0, 0), pane_id(0, 0));
         app.reorder_focused_pane(Direction::Down);
@@ -626,6 +721,9 @@ mod tests {
         let mut app = App::new(workspace, SessionState::default()).unwrap();
         let mut terminal = vt100::Parser::new(2, 8, SCROLLBACK_LINES);
         terminal.process(b"one\r\ntwo\r\nthree\r\nfour");
+        terminal.set_scrollback(usize::MAX);
+        let scrollback_max = terminal.screen().scrollback();
+        terminal.set_scrollback(0);
         app.panes.insert(pane_id(0, 0), PaneRuntime {
             id: pane_id(0, 0),
             name: "a".to_owned(),
@@ -633,6 +731,7 @@ mod tests {
             terminal,
             exited: false,
             view: PaneViewState::default(),
+            scrollback_max,
         });
         app.scroll_focused_pane(Direction::Up);
         assert_eq!(app.panes[&pane_id(0, 0)].view.vertical, 2);
@@ -641,6 +740,70 @@ mod tests {
         assert_eq!(app.panes[&pane_id(0, 0)].view.presentation, PresentationMode::Horizontal);
         app.scroll_focused_pane(Direction::Down);
         assert_eq!(app.panes[&pane_id(0, 0)].view.vertical, 0);
+    }
+
+    #[test]
+    fn repeated_vertical_wheel_scroll_stays_clamped_to_scrollback() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let mut terminal = vt100::Parser::new(2, 8, SCROLLBACK_LINES);
+        terminal.process(b"one\r\ntwo\r\nthree\r\nfour");
+        terminal.set_scrollback(usize::MAX);
+        let scrollback_max = terminal.screen().scrollback();
+        terminal.set_scrollback(0);
+        app.panes.insert(pane_id(0, 0), PaneRuntime {
+            id: pane_id(0, 0),
+            name: "a".to_owned(),
+            command: "sh".to_owned(),
+            terminal,
+            exited: false,
+            view: PaneViewState::default(),
+            scrollback_max,
+        });
+
+        for _ in 0..1_000 {
+            app.scroll_focused_pane(Direction::Up);
+        }
+
+        let pane = &app.panes[&pane_id(0, 0)];
+        assert_eq!(pane.view.vertical, pane.scrollback_max);
+        assert_eq!(pane.terminal.screen().scrollback(), pane.scrollback_max);
+    }
+
+    #[test]
+    fn vertical_scroll_keeps_vt100_cell_rendering_in_safe_bounds() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let mut terminal = vt100::Parser::new(2, 8, SCROLLBACK_LINES);
+        terminal.process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven");
+        terminal.set_scrollback(usize::MAX);
+        let full_scrollback = terminal.screen().scrollback();
+        assert!(full_scrollback > usize::from(terminal.screen().size().0));
+        terminal.set_scrollback(0);
+        app.panes.insert(pane_id(0, 0), PaneRuntime {
+            id: pane_id(0, 0),
+            name: "a".to_owned(),
+            command: "sh".to_owned(),
+            terminal,
+            exited: false,
+            view: PaneViewState::default(),
+            scrollback_max: full_scrollback,
+        });
+
+        for _ in 0..1_000 {
+            app.scroll_focused_pane(Direction::Up);
+        }
+
+        let pane = &app.panes[&pane_id(0, 0)];
+        assert_eq!(pane.view.vertical, usize::from(pane.terminal.screen().size().0));
+        assert_eq!(pane.terminal.screen().scrollback(), pane.view.vertical);
+        let _ = pane.terminal.screen().cell(0, 0);
     }
 
     #[test]
@@ -657,6 +820,7 @@ mod tests {
             terminal: vt100::Parser::new(2, 8, SCROLLBACK_LINES),
             exited: false,
             view: PaneViewState::default(),
+            scrollback_max: 0,
         });
         for _ in 0..1_000 {
             app.scroll_focused_pane(Direction::Right);
@@ -679,6 +843,7 @@ mod tests {
                 terminal: vt100::Parser::new(12, 38, SCROLLBACK_LINES),
                 exited: false,
                 view: PaneViewState::default(),
+                scrollback_max: 0,
             });
         }
         let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();

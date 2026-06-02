@@ -14,6 +14,8 @@ pub struct Workspace {
     #[serde(default = "default_peek")]
     pub peek: u16,
     #[serde(default)]
+    pub wrap_columns: bool,
+    #[serde(default)]
     pub presets: WidthPresets,
     #[serde(default)]
     pub ui: UiConfig,
@@ -49,6 +51,8 @@ impl Default for PaneLayoutMode {
 pub struct UiConfig {
     pub accent: UiColor,
     pub muted: UiColor,
+    pub selection_fg: UiColor,
+    pub selection_bg: UiColor,
     pub status_fg: UiColor,
     pub status_bg: UiColor,
 }
@@ -58,6 +62,8 @@ impl Default for UiConfig {
         Self {
             accent: UiColor::LightMagenta,
             muted: UiColor::DarkGray,
+            selection_fg: UiColor::Black,
+            selection_bg: UiColor::White,
             status_fg: UiColor::White,
             status_bg: UiColor::Blue,
         }
@@ -379,6 +385,7 @@ mod tests {
         ).unwrap();
         assert_eq!(workspace.gap, 2);
         assert_eq!(workspace.peek, 3);
+        assert!(!workspace.wrap_columns);
         assert_eq!(workspace.columns[0].width, WidthPolicy::Preset("medium".into()));
         assert_eq!(workspace.columns[0].layout, PaneLayoutMode::Fit);
         assert_eq!(workspace.ui.accent, UiColor::LightMagenta);
@@ -387,9 +394,11 @@ mod tests {
     #[test]
     fn parses_explicit_ui_and_carousel_layout() {
         let workspace = Workspace::parse(
-            "ui:\n  accent: light-magenta\n  muted: dark-gray\n  status_fg: white\n  status_bg: blue\ncolumns:\n  - name: editor\n    layout: carousel\n    width: medium\n    panes:\n      - name: shell\n        command: echo hi\n",
+            "wrap_columns: true\nui:\n  accent: light-magenta\n  muted: dark-gray\n  selection_fg: black\n  selection_bg: white\n  status_fg: white\n  status_bg: blue\ncolumns:\n  - name: editor\n    layout: carousel\n    width: medium\n    panes:\n      - name: shell\n        command: echo hi\n",
         ).unwrap();
+        assert!(workspace.wrap_columns);
         assert_eq!(workspace.ui.accent, UiColor::LightMagenta);
+        assert_eq!(workspace.ui.selection_bg, UiColor::White);
         assert_eq!(workspace.ui.status_bg, UiColor::Blue);
         assert_eq!(workspace.columns[0].layout, PaneLayoutMode::Carousel);
     }
@@ -427,6 +436,11 @@ mod tests {
         assert_eq!(workspace.columns[0].name, "welcome");
         assert_eq!(workspace.columns[0].layout, PaneLayoutMode::Fit);
         assert_eq!(workspace.columns[0].panes.len(), 2);
+        assert_eq!(workspace.columns[0].panes[0].name, "welcome");
+        assert!(workspace.columns[0].panes[0]
+            .command
+            .contains("Welcome to your terminal workspace."));
+        assert!(!workspace.columns[0].panes[0].command.contains("README.md"));
         assert_eq!(workspace.columns[1].name, "main");
         assert_eq!(workspace.columns[1].width, WidthPolicy::Preset("big".into()));
         assert_eq!(workspace.columns[2].name, "carousel");

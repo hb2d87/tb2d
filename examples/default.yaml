@@ -2,17 +2,20 @@ name: tb2d
 ui:
   accent: light-magenta
   muted: dark-gray
+  selection_fg: black
+  selection_bg: white
   status_fg: white
   status_bg: blue
 gap: 2
 peek: 3
+wrap_columns: true
 columns:
   - name: welcome
     layout: fit
     width: medium
     panes:
-      - name: README
-        command: "if [ -f README.md ]; then ${PAGER:-less} README.md || cat README.md; else printf 'TB2D\\n\\nREADME.md is not available in this directory.\\n'; fi; exec ${SHELL:-sh}"
+      - name: welcome
+        command: "printf 'TB2D\\n\\nWelcome to your terminal workspace.\\n\\nNavigate: Alt+h/j/k/l\\nResize column: Alt+- / Alt+=\\nCycle layout: Alt+m\\nExit: Ctrl+q\\n\\n'; exec ${SHELL:-sh}"
       - name: home
         command: "ls -la ~; exec ${SHELL:-sh}"
   - name: main
