@@ -142,6 +142,11 @@ pub enum WidthPolicy {
 }
 
 impl Workspace {
+    pub fn default_template() -> Result<Self> {
+        Self::parse(include_str!("../examples/default.yaml"))
+            .context("invalid built-in default workspace")
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let source = fs::read_to_string(path)
             .with_context(|| format!("failed to read workspace {}", path.display()))?;
@@ -413,5 +418,21 @@ mod tests {
         assert!(Workspace::parse(
             "unexpected: true\ncolumns:\n  - name: one\n    width: 40\n    panes:\n      - name: shell\n",
         ).is_err());
+    }
+
+    #[test]
+    fn built_in_default_workspace_has_the_product_layout() {
+        let workspace = Workspace::default_template().unwrap();
+        assert_eq!(workspace.columns.len(), 4);
+        assert_eq!(workspace.columns[0].name, "welcome");
+        assert_eq!(workspace.columns[0].layout, PaneLayoutMode::Fit);
+        assert_eq!(workspace.columns[0].panes.len(), 2);
+        assert_eq!(workspace.columns[1].name, "main");
+        assert_eq!(workspace.columns[1].width, WidthPolicy::Preset("big".into()));
+        assert_eq!(workspace.columns[2].name, "carousel");
+        assert_eq!(workspace.columns[2].layout, PaneLayoutMode::Carousel);
+        assert_eq!(workspace.columns[2].panes.len(), 3);
+        assert_eq!(workspace.columns[3].name, "Agent");
+        assert_eq!(workspace.columns[3].width, WidthPolicy::Preset("big".into()));
     }
 }

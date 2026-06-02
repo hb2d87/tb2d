@@ -156,6 +156,30 @@ impl Layout {
         }
 
         let clamped_focus = focus_pane.min(pane_count - 1);
+        if pane_count >= 3 {
+            let preview_height = peek
+                .max(2)
+                .min((self.content_height.saturating_sub(1) / 3).max(1));
+            let focus_height = self.content_height.saturating_sub(preview_height * 2);
+            let previous = (clamped_focus + pane_count - 1) % pane_count;
+            let next = (clamped_focus + 1) % pane_count;
+            let mut panes = vec![None; pane_count];
+            panes[previous] = Some(Rect::new(column_layout.x, 0, column_layout.width, preview_height));
+            panes[clamped_focus] = Some(Rect::new(
+                column_layout.x,
+                preview_height,
+                column_layout.width,
+                focus_height,
+            ));
+            panes[next] = Some(Rect::new(
+                column_layout.x,
+                preview_height.saturating_add(focus_height),
+                column_layout.width,
+                preview_height,
+            ));
+            return panes;
+        }
+
         let has_previous = clamped_focus > 0;
         let has_next = clamped_focus + 1 < pane_count;
         let visible_neighbors = u16::from(has_previous) + u16::from(has_next);
@@ -286,13 +310,13 @@ mod tests {
     }
 
     #[test]
-    fn carousel_focus_at_column_edges_expands_to_available_space() {
+    fn carousel_focus_at_column_edges_wraps_and_stays_centered() {
         let layout = Layout::calculate(&carousel_workspace(), 80, 20).unwrap();
         let rects = layout.carousel_pane_rects(0, 0, 3);
-        assert_eq!(rects[0], Some(Rect::new(0, 0, 40, 17)));
+        assert_eq!(rects[0], Some(Rect::new(0, 3, 40, 14)));
         assert_eq!(rects[1], Some(Rect::new(0, 17, 40, 3)));
         assert_eq!(rects[2], None);
-        assert_eq!(rects[3], None);
+        assert_eq!(rects[3], Some(Rect::new(0, 0, 40, 3)));
     }
 
     #[test]

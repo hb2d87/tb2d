@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a TB2D release binary with README and example config.
+"""Package a TB2D release binary with README and workspace templates.
 
 Creates both .tar.gz and .zip archives in the requested output directory.
 """
@@ -36,6 +36,12 @@ def main() -> int:
     parser.add_argument("--binary", required=True, type=Path, help="Path to the built tb2d binary")
     parser.add_argument("--readme", default=Path("README.md"), type=Path, help="Path to README.md")
     parser.add_argument(
+        "--default-config",
+        default=Path("examples/default.yaml"),
+        type=Path,
+        help="Path to the default workspace config",
+    )
+    parser.add_argument(
         "--example-config",
         default=Path("examples/web-reader.yaml"),
         type=Path,
@@ -49,9 +55,10 @@ def main() -> int:
 
     binary = args.binary
     readme = args.readme
+    default_config = args.default_config
     example_config = args.example_config
 
-    for path in (binary, readme, example_config):
+    for path in (binary, readme, default_config, example_config):
         if not path.exists():
             print(f"error: missing required input: {path}", file=sys.stderr)
             return 1
@@ -66,6 +73,7 @@ def main() -> int:
 
         copy_into(package_root, binary, args.name)
         copy_into(package_root, readme, "README.md")
+        copy_into(package_root, default_config, default_config.name)
         copy_into(package_root, example_config, example_config.name)
 
         tar_path = args.out_dir / f"{archive_base}.tar.gz"

@@ -1,0 +1,39 @@
+name: tb2d
+ui:
+  accent: light-magenta
+  muted: dark-gray
+  status_fg: white
+  status_bg: blue
+gap: 2
+peek: 3
+columns:
+  - name: welcome
+    layout: fit
+    width: medium
+    panes:
+      - name: README
+        command: "if [ -f README.md ]; then ${PAGER:-less} README.md || cat README.md; else printf 'TB2D\\n\\nREADME.md is not available in this directory.\\n'; fi; exec ${SHELL:-sh}"
+      - name: home
+        command: "ls -la ~; exec ${SHELL:-sh}"
+  - name: main
+    layout: fit
+    width: big
+    panes:
+      - name: terminal
+        command: "${SHELL:-sh}"
+  - name: carousel
+    layout: carousel
+    width: medium
+    panes:
+      - name: one
+        command: "${SHELL:-sh}"
+      - name: two
+        command: "${SHELL:-sh}"
+      - name: three
+        command: "${SHELL:-sh}"
+  - name: Agent
+    layout: fit
+    width: big
+    panes:
+      - name: terminal
+        command: "${SHELL:-sh}"

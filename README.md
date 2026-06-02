@@ -4,18 +4,55 @@ TB2D is a Rust terminal workspace manager with a horizontally scrollable strip
 of columns and PTY-backed panes. Each column can choose a pane layout mode:
 `fit` for stacked panes or `carousel` for a focused, zellij-like vertical view.
 
-## Run
+## Install
+
+Install the latest Linux x86_64 or Apple Silicon macOS release to
+`~/.local/bin/tb2d`:
 
 ```bash
-cargo run -- ./examples/web-reader.yaml --session main
+curl -fsSL https://raw.githubusercontent.com/hb2d/tb2d/master/scripts/install.sh | sh
+```
+
+The installer accepts `--version`, `--install-dir`, and `--repo` options. For
+example, install a specific release into a custom directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hb2d/tb2d/master/scripts/install.sh |
+  sh -s -- --version v0.1.0 --install-dir "$HOME/bin"
+```
+
+For local development, build and install the same `tb2d` command with Cargo:
+
+```bash
+cargo install --path .
+```
+
+## Run
+
+Launch the built-in four-column workspace:
+
+```bash
+tb2d
+```
+
+Start or replace a named session with a YAML workspace template:
+
+```bash
+tb2d --template ./examples/web-reader.yaml --session main
+```
+
+Later, restore that session and its remembered template with:
+
+```bash
+tb2d --session main
 ```
 
 Use `Alt+h/j/k/l` or `Alt+Arrow` to change focus, click a pane to focus it,
 and press `Ctrl+q` to exit. The viewport eases into focus changes instead of
 jumping abruptly. Use `Alt+-` and `Alt+=` to resize the focused column, or
-`Alt+0` to return it to its configured width. Focus, viewport offset, and
-column width overrides are saved under the platform state directory in
-`tb2d/<session>.json`.
+`Alt+0` to return it to its configured width. The template, focus, viewport
+offset, and column width overrides are saved under the platform state
+directory in `tb2d/<session>.json`.
 
 Pane controls:
 
@@ -31,12 +68,11 @@ selection is remembered independently for each column.
 
 ## Release archives
 
-When you publish a release, friends can download the matching archive for
-Linux or macOS, unpack it, and run the bundled binary directly:
+Release archives remain usable without the installer:
 
 ```bash
 tar -xzf tb2d-vX.Y.Z-linux-x86_64.tar.gz
-./tb2d-vX.Y.Z-linux-x86_64/tb2d ./tb2d-vX.Y.Z-linux-x86_64/web-reader.yaml --session main
+./tb2d-vX.Y.Z-linux-x86_64/tb2d
 ```
 
 ## Workspace YAML

@@ -14,6 +14,8 @@ use std::{
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionState {
     #[serde(default)]
+    pub template: Option<PathBuf>,
+    #[serde(default)]
     pub focus: FocusRef,
     #[serde(default)]
     pub viewport: ViewportState,
@@ -152,6 +154,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("tb2d-session-{}.json", std::process::id()));
         let store = SessionStore::at(path.clone());
         let expected = SessionState {
+            template: Some(PathBuf::from("/tmp/workspace.yaml")),
             focus: FocusRef { column: 2, pane: 1 },
             viewport: ViewportState { offset: 42 },
             column_widths: vec![None, Some(72), None],
@@ -184,6 +187,14 @@ mod tests {
         assert_eq!(missing.pane_views, Vec::<Vec<PaneViewState>>::new());
         assert_eq!(malformed.pane_selections, Vec::<usize>::new());
         assert_eq!(malformed.pane_views, Vec::<Vec<PaneViewState>>::new());
+    }
+
+    #[test]
+    fn older_sessions_without_a_template_remain_compatible() {
+        let state: SessionState = serde_json::from_str(
+            r#"{"focus":{"column":1,"pane":0},"viewport":{"offset":12}}"#,
+        ).unwrap();
+        assert_eq!(state.template, None);
     }
 
     #[test]

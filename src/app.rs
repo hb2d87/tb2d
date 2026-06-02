@@ -8,7 +8,7 @@ use crate::{
 use anyhow::Result;
 use ratatui::layout::Rect;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::PathBuf};
 use tracing::warn;
 
 const SCROLLBACK_LINES: usize = 1_000;
@@ -63,6 +63,7 @@ pub struct App {
     pub focus: FocusRef,
     pub viewport: ViewportState,
     pub viewport_target: u16,
+    pub session_template: Option<PathBuf>,
     pub column_widths: Vec<Option<u16>>,
     pub pane_selections: Vec<usize>,
     pub pane_layouts: Vec<PaneLayoutMode>,
@@ -76,6 +77,7 @@ pub struct App {
 impl App {
     pub fn new(workspace: Workspace, restored: SessionState) -> Result<Self> {
         let viewport_target = restored.viewport.offset;
+        let session_template = restored.template.clone();
         let column_widths = normalize_column_widths(&workspace, restored.column_widths);
         let pane_selections = normalize_pane_selections(&workspace, restored.pane_selections);
         let restored_pane_views = normalize_pane_views(&workspace, restored.pane_views);
@@ -85,6 +87,7 @@ impl App {
             focus: restored.focus,
             viewport: restored.viewport,
             viewport_target,
+            session_template,
             column_widths,
             pane_selections,
             pane_layouts,
@@ -127,6 +130,7 @@ impl App {
 
     pub fn session_state(&self) -> SessionState {
         SessionState {
+            template: self.session_template.clone(),
             focus: self.focus,
             viewport: ViewportState { offset: self.viewport_target },
             column_widths: self.column_widths.clone(),
@@ -208,10 +212,21 @@ impl App {
                 self.focus.column = (self.focus.column + 1).min(self.workspace.columns.len() - 1);
                 self.focus.pane = self.pane_selections[self.focus.column];
             }
-            Direction::Up => self.focus.pane = self.focus.pane.saturating_sub(1),
+            Direction::Up => {
+                self.focus.pane = if self.pane_layouts[self.focus.column] == PaneLayoutMode::Carousel {
+                    (self.focus.pane + self.workspace.columns[self.focus.column].panes.len() - 1)
+                        % self.workspace.columns[self.focus.column].panes.len()
+                } else {
+                    self.focus.pane.saturating_sub(1)
+                };
+            }
             Direction::Down => {
-                self.focus.pane = (self.focus.pane + 1)
-                    .min(self.workspace.columns[self.focus.column].panes.len() - 1);
+                self.focus.pane = if self.pane_layouts[self.focus.column] == PaneLayoutMode::Carousel {
+                    (self.focus.pane + 1) % self.workspace.columns[self.focus.column].panes.len()
+                } else {
+                    (self.focus.pane + 1)
+                        .min(self.workspace.columns[self.focus.column].panes.len() - 1)
+                };
             }
         }
         self.clamp_focus();
@@ -491,6 +506,7 @@ mod tests {
             focus: FocusRef { column: 0, pane: 0 },
             viewport: ViewportState::default(),
             viewport_target: 0,
+            session_template: None,
             column_widths: vec![Some(64), None],
             pane_selections: vec![0, 0],
             pane_layouts: vec![PaneLayoutMode::Fit, PaneLayoutMode::Fit],
@@ -505,6 +521,7 @@ mod tests {
             focus: FocusRef { column: 1, pane: 0 },
             viewport: ViewportState::default(),
             viewport_target: 0,
+            session_template: None,
             column_widths: vec![None, None],
             pane_selections: vec![0, 0],
             pane_layouts: vec![PaneLayoutMode::Fit, PaneLayoutMode::Fit],
@@ -546,6 +563,19 @@ mod tests {
         assert_eq!(app.focus, FocusRef { column: 0, pane: 1 });
         app.move_focus(Direction::Right);
         assert_eq!(app.focus, FocusRef { column: 1, pane: 1 });
+    }
+
+    #[test]
+    fn carousel_navigation_wraps_between_the_first_and_last_panes() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    layout: carousel\n    width: 40\n    panes:\n      - name: a\n      - name: b\n      - name: c\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, Default::default()).unwrap();
+        app.move_focus(Direction::Up);
+        assert_eq!(app.focus.pane, 2);
+        app.move_focus(Direction::Down);
+        assert_eq!(app.focus.pane, 0);
     }
 
     #[test]
