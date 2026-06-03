@@ -64,6 +64,14 @@ impl PresentationMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AppMode {
+    #[default]
+    Live,
+    Control,
+    Resize,
+}
+
 pub struct App {
     pub workspace: Workspace,
     pub focus: FocusRef,
@@ -75,7 +83,7 @@ pub struct App {
     pub pane_layouts: Vec<PaneLayoutMode>,
     pub pane_weights: Vec<Vec<u16>>,
     pub zoomed: Option<FocusRef>,
-    pub control_mode: bool,
+    pub mode: AppMode,
     pub status_message: Option<String>,
     pub panes: HashMap<PaneId, PaneRuntime>,
     pub should_quit: bool,
@@ -105,7 +113,7 @@ impl App {
             pane_layouts,
             pane_weights,
             zoomed,
-            control_mode: false,
+            mode: AppMode::Live,
             status_message: None,
             panes: HashMap::new(),
             should_quit: false,
@@ -366,12 +374,17 @@ impl App {
     }
 
     pub fn enter_control_mode(&mut self) {
-        self.control_mode = true;
+        self.mode = AppMode::Control;
         self.status_message = None;
     }
 
-    pub fn exit_control_mode(&mut self) {
-        self.control_mode = false;
+    pub fn enter_resize_mode(&mut self) {
+        self.mode = AppMode::Resize;
+        self.status_message = None;
+    }
+
+    pub fn exit_mode(&mut self) {
+        self.mode = AppMode::Live;
     }
 
     pub fn set_status(&mut self, message: impl Into<String>) {
@@ -1035,7 +1048,7 @@ mod tests {
             pane_layouts: vec![PaneLayoutMode::Fit, PaneLayoutMode::Fit],
             pane_weights: vec![vec![1], vec![1]],
             zoomed: None,
-            control_mode: false,
+            mode: AppMode::Live,
             status_message: None,
             panes: HashMap::new(),
             should_quit: false,
@@ -1054,7 +1067,7 @@ mod tests {
             pane_layouts: vec![PaneLayoutMode::Fit, PaneLayoutMode::Fit],
             pane_weights: vec![vec![1], vec![1]],
             zoomed: None,
-            control_mode: false,
+            mode: AppMode::Live,
             status_message: None,
             panes: HashMap::new(),
             should_quit: false,

@@ -1,6 +1,18 @@
 # Changelog
 
-All notable changes to TB2D will be documented in this file.
+All notable changes to tb2d will be documented in this file.
+
+## Unreleased
+
+- Added Zellij-inspired live/control/resize hotkey layers, including direct
+  `Alt+n` pane creation, `Alt+c` column creation, and `Alt+r` resize mode.
+- Updated control mode so `h/j/k/l` moves focus while resize commands live in
+  the dedicated resize mode.
+- Added a README flow GIF that shows the horizontally scrollable workspace and
+  viewport movement.
+- Documented the project as draft-stage and developed with heavy LLM
+  assistance.
+- Normalized user-facing project naming to lowercase `tb2d`.
 
 ## 0.1.1 - 2026-06-03
 

@@ -67,7 +67,7 @@ impl Cli {
     }
 
     pub fn help() -> &'static str {
-        "TB2D - a spatial terminal workspace manager
+        "tb2d - a spatial terminal workspace manager
 
 Usage: tb2d [--template <workspace.yaml>] [--session <name>]
 

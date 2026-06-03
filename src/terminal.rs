@@ -1,6 +1,6 @@
 use crate::{
-    app::App,
-    input::{map_control_key, Action, ControlAction, map_key},
+    app::{App, AppMode},
+    input::{map_control_key, map_resize_key, Action, ControlAction, ResizeAction, map_key},
     layout::Layout,
     render,
     session::SessionStore,
@@ -122,15 +122,25 @@ fn handle_event(
 ) -> Result<()> {
     match event {
         Event::Key(key)
-            if app.control_mode && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+            if app.mode == AppMode::Control
+                && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
         {
             handle_control_action(app, layout, store, map_control_key(key));
+        }
+        Event::Key(key)
+            if app.mode == AppMode::Resize
+                && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+        {
+            handle_resize_action(app, layout, map_resize_key(key));
         }
         Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
             match map_key(key) {
                 Action::Quit => app.should_quit = true,
                 Action::EnterControlMode => app.enter_control_mode(),
+                Action::EnterResizeMode => app.enter_resize_mode(),
                 Action::Move(direction) => app.move_focus(direction),
+                Action::AddPane => add_pane(app, layout, store),
+                Action::AddColumn => add_column(app, layout, store),
                 Action::ResizeColumn(grow) => app.resize_focused_column(layout, grow),
                 Action::ResetColumnWidth => app.reset_focused_column_width(),
                 Action::ToggleZoom => app.toggle_focused_zoom(),
@@ -171,38 +181,26 @@ fn handle_control_action(
 ) {
     match action {
         ControlAction::Cancel => {
-            app.exit_control_mode();
+            app.exit_mode();
             app.set_status("control cancelled");
+        }
+        ControlAction::EnterResizeMode => {
+            app.enter_resize_mode();
         }
         ControlAction::ToggleZoom => {
             app.toggle_focused_zoom();
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::AddPane => {
-            match app.add_pane_after_focus(layout) {
-                Ok(()) => note(
-                    store,
-                    "pane-added",
-                    &[("column", json!(app.focus.column)), ("pane", json!(app.focus.pane))],
-                ),
-                Err(error) => {
-                    warn!(%error, "failed to add pane");
-                    app.set_status("add pane failed");
-                    note(store, "pane-add-failed", &[("error", json!(error.to_string()))]);
-                }
-            }
-            app.exit_control_mode();
+            add_pane(app, layout, store);
+            app.exit_mode();
         }
         ControlAction::AddColumn => {
-            match app.add_column_after_focus(layout) {
-                Ok(()) => note(store, "column-added", &[("column", json!(app.focus.column))]),
-                Err(error) => {
-                    warn!(%error, "failed to add column");
-                    app.set_status("add column failed");
-                    note(store, "column-add-failed", &[("error", json!(error.to_string()))]);
-                }
-            }
-            app.exit_control_mode();
+            add_column(app, layout, store);
+            app.exit_mode();
+        }
+        ControlAction::Move(direction) => {
+            app.move_focus(direction);
         }
         ControlAction::MovePane(direction) => {
             app.move_focused_pane_to_column(direction);
@@ -211,33 +209,24 @@ fn handle_control_action(
                 "pane-moved",
                 &[("column", json!(app.focus.column)), ("pane", json!(app.focus.pane))],
             );
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::MoveColumn(direction) => {
             app.move_focused_column(direction);
             note(store, "column-moved", &[("column", json!(app.focus.column))]);
-            app.exit_control_mode();
-        }
-        ControlAction::ResizePane(grow) => {
-            app.resize_focused_pane(grow);
-            app.exit_control_mode();
-        }
-        ControlAction::ResizeColumn(grow) => {
-            app.resize_focused_column(layout, grow);
-            app.set_status(if grow { "column grew" } else { "column shrank" });
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::ResetSpace => {
             app.reset_focused_space();
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::CycleLayout => {
             app.cycle_focused_layout();
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::CyclePresentation => {
             app.cycle_focused_presentation();
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::SaveSession => {
             match store.save(&app.session_state()) {
@@ -251,10 +240,58 @@ fn handle_control_action(
                     note(store, "manual-save-failed", &[("error", json!(error.to_string()))]);
                 }
             }
-            app.exit_control_mode();
+            app.exit_mode();
         }
         ControlAction::Ignore => {
             app.set_status("unknown control key");
+        }
+    }
+}
+
+fn handle_resize_action(app: &mut App, layout: &Layout, action: ResizeAction) {
+    match action {
+        ResizeAction::Cancel => {
+            app.exit_mode();
+            app.set_status("resize finished");
+        }
+        ResizeAction::ResizePane(grow) => {
+            app.resize_focused_pane(grow);
+        }
+        ResizeAction::ResizeColumn(grow) => {
+            app.resize_focused_column(layout, grow);
+            app.set_status(if grow { "column grew" } else { "column shrank" });
+        }
+        ResizeAction::ResetSpace => {
+            app.reset_focused_space();
+        }
+        ResizeAction::Ignore => {
+            app.set_status("unknown resize key");
+        }
+    }
+}
+
+fn add_pane(app: &mut App, layout: &Layout, store: &SessionStore) {
+    match app.add_pane_after_focus(layout) {
+        Ok(()) => note(
+            store,
+            "pane-added",
+            &[("column", json!(app.focus.column)), ("pane", json!(app.focus.pane))],
+        ),
+        Err(error) => {
+            warn!(%error, "failed to add pane");
+            app.set_status("add pane failed");
+            note(store, "pane-add-failed", &[("error", json!(error.to_string()))]);
+        }
+    }
+}
+
+fn add_column(app: &mut App, layout: &Layout, store: &SessionStore) {
+    match app.add_column_after_focus(layout) {
+        Ok(()) => note(store, "column-added", &[("column", json!(app.focus.column))]),
+        Err(error) => {
+            warn!(%error, "failed to add column");
+            app.set_status("add column failed");
+            note(store, "column-add-failed", &[("error", json!(error.to_string()))]);
         }
     }
 }
@@ -316,7 +353,7 @@ struct EnableBasicMouseCapture;
 
 impl Command for EnableBasicMouseCapture {
     fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
-        // Crossterm's broad mouse capture enables motion tracking too. TB2D only
+        // Crossterm's broad mouse capture enables motion tracking too. tb2d only
         // needs click and wheel events, so use basic SGR mouse reporting.
         f.write_str(concat!(
             "\x1b[?1000h",
