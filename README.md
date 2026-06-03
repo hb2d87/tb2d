@@ -26,6 +26,18 @@ Highlights:
 See [CHANGELOG.md](CHANGELOG.md) for release notes and [LICENSE](LICENSE) for
 license terms.
 
+## Screenshots
+
+![TB2D overview](docs/assets/tb2d-overview.png)
+
+Control mode:
+
+![TB2D control mode](docs/assets/tb2d-control-mode.png)
+
+Zoomed pane:
+
+![TB2D zoomed pane](docs/assets/tb2d-zoomed-pane.png)
+
 ## Install
 
 Install the latest Linux x86_64 or Apple Silicon macOS release to
