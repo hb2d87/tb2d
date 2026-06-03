@@ -1,15 +1,16 @@
-# TB2D
+# tb2d 
+Terminal Board 2d
 
 [![CI](https://github.com/hb2d87/tb2d/actions/workflows/ci.yml/badge.svg)](https://github.com/hb2d87/tb2d/actions/workflows/ci.yml)
 [![Release](https://github.com/hb2d87/tb2d/actions/workflows/release.yml/badge.svg)](https://github.com/hb2d87/tb2d/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-TB2D is a Rust terminal workspace manager with a horizontally scrollable strip
+tb2d is a Rust terminal workspace manager with a horizontally scrollable strip
 of columns and PTY-backed panes. Each column can choose a pane layout mode:
 `fit` for stacked panes or `carousel` for a focused, zellij-like vertical view.
 
 It is built for terminal workspaces that need more spatial memory than a stack
-of tabs: keep a welcome pane, shell, code assistant, logs, and focused tool
+of tabs: keep a pane, shell, code assistant, logs, and focused tool
 output in one sliding canvas.
 
 Highlights:
