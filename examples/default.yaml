@@ -18,7 +18,7 @@ columns:
         command: "printf 'TB2D\\n\\nWelcome to your terminal workspace.\\n\\nNavigate: Alt+h/j/k/l\\nZoom pane: Alt+z\\nControl mode: Alt+p\\nNew pane/column: Alt+p then n/c\\nResize column: Alt+- / Alt+=\\nCycle layout: Alt+m\\nExit: Ctrl+q\\n\\n'; exec ${SHELL:-sh}"
       - name: home
         command: "ls -la ~; exec ${SHELL:-sh}"
-  - name: main
+  - name: main terminal
     layout: fit
     width: big
     panes:
@@ -34,9 +34,11 @@ columns:
         command: "${SHELL:-sh}"
       - name: three
         command: "${SHELL:-sh}"
-  - name: Agent
+  - name: agent
     layout: fit
     width: big
     panes:
-      - name: terminal
+      - name: assistant
+        command: "${SHELL:-sh}"
+      - name: notes
         command: "${SHELL:-sh}"

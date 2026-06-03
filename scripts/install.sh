@@ -4,15 +4,25 @@ set -eu
 repo="${TB2D_REPO:-hb2d87/tb2d}"
 install_dir="${TB2D_INSTALL_DIR:-$HOME/.local/bin}"
 version="${TB2D_VERSION:-latest}"
+path_update="${TB2D_PATH_UPDATE:-auto}"
 
 usage() {
   cat <<'EOF'
 Install the latest TB2D release binary.
 
-Usage: install.sh [--repo OWNER/REPO] [--version vX.Y.Z] [--install-dir PATH]
+Usage: install.sh [--repo OWNER/REPO] [--version vX.Y.Z] [--install-dir PATH] [--no-path-update]
 
-Environment overrides: TB2D_REPO, TB2D_VERSION, TB2D_INSTALL_DIR
+Environment overrides: TB2D_REPO, TB2D_VERSION, TB2D_INSTALL_DIR, TB2D_PATH_UPDATE
 EOF
+}
+
+profile_path() {
+  shell_name="${SHELL##*/}"
+  case "$shell_name" in
+    zsh) printf '%s\n' "$HOME/.zshrc" ;;
+    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    *) printf '%s\n' "$HOME/.profile" ;;
+  esac
 }
 
 while [ "$#" -gt 0 ]; do
@@ -29,6 +39,7 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --no-path-update) path_update="never"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'error: unknown option: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -68,5 +79,20 @@ chmod +x "$install_dir/tb2d"
 printf 'Installed tb2d to %s/tb2d\n' "$install_dir"
 case ":$PATH:" in
   *":$install_dir:"*) ;;
-  *) printf 'Add %s to PATH to run tb2d directly.\n' "$install_dir" ;;
+  *)
+    if [ "$path_update" = "never" ]; then
+      printf 'Add %s to PATH to run tb2d directly.\n' "$install_dir"
+    else
+      profile_file="$(profile_path)"
+      mkdir -p "$(dirname "$profile_file")"
+      if [ ! -f "$profile_file" ] || ! grep -F "export PATH=\"$install_dir:\$PATH\"" "$profile_file" >/dev/null 2>&1; then
+        {
+          printf '\n# Added by tb2d installer\n'
+          printf 'export PATH="%s:$PATH"\n' "$install_dir"
+        } >> "$profile_file"
+      fi
+      printf 'Added %s to PATH in %s\n' "$install_dir" "$profile_file"
+      printf 'Open a new terminal, or run: export PATH="%s:$PATH"\n' "$install_dir"
+    fi
+    ;;
 esac

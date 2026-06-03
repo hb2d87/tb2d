@@ -55,6 +55,10 @@ curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.
   sh -s -- --version v0.1.0 --install-dir "$HOME/bin"
 ```
 
+If the install directory is not already on your `PATH`, the installer adds it
+to your shell profile and prints the one-line `export PATH=...` command for the
+current terminal. Pass `--no-path-update` to skip profile changes.
+
 For local development, build and install the same `tb2d` command with Cargo:
 
 ```bash
@@ -68,6 +72,10 @@ Launch the built-in four-column workspace:
 ```bash
 tb2d
 ```
+
+No flags are required. The default view is `2r, 1r, 3rc, 2r`: two stacked
+welcome panes, one main terminal pane, a three-pane carousel column, and two
+stacked agent panes.
 
 Start or replace a named session with a YAML workspace template:
 

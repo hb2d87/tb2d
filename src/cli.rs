@@ -77,6 +77,7 @@ Options:
   -h, --help         Print help
   -V, --version      Print version
 
+Run tb2d without flags to open the built-in 2r, 1r, 3rc, 2r workspace.
 A session remembers its template. Pass --template again to replace it."
     }
 }

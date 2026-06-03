@@ -2,6 +2,15 @@
 
 All notable changes to TB2D will be documented in this file.
 
+## 0.1.1 - 2026-06-03
+
+- Updated the built-in default workspace to the intended `2r, 1r, 3rc, 2r`
+  layout.
+- Improved the installer so it can add the install directory to the user's
+  shell profile when `tb2d` would otherwise not be on `PATH`.
+- Clarified that `tb2d` works without `--session` or `--template`; both flags
+  are optional.
+
 ## 0.1.0 - 2026-06-03
 
 Initial shareable release.

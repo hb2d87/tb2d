@@ -473,12 +473,16 @@ mod tests {
             .command
             .contains("Welcome to your terminal workspace."));
         assert!(!workspace.columns[0].panes[0].command.contains("README.md"));
-        assert_eq!(workspace.columns[1].name, "main");
+        assert_eq!(workspace.columns[1].name, "main terminal");
+        assert_eq!(workspace.columns[1].layout, PaneLayoutMode::Fit);
         assert_eq!(workspace.columns[1].width, WidthPolicy::Preset("big".into()));
+        assert_eq!(workspace.columns[1].panes.len(), 1);
         assert_eq!(workspace.columns[2].name, "carousel");
         assert_eq!(workspace.columns[2].layout, PaneLayoutMode::Carousel);
         assert_eq!(workspace.columns[2].panes.len(), 3);
-        assert_eq!(workspace.columns[3].name, "Agent");
+        assert_eq!(workspace.columns[3].name, "agent");
+        assert_eq!(workspace.columns[3].layout, PaneLayoutMode::Fit);
         assert_eq!(workspace.columns[3].width, WidthPolicy::Preset("big".into()));
+        assert_eq!(workspace.columns[3].panes.len(), 2);
     }
 }
