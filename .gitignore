@@ -1,3 +1,5 @@
 /target
 *.swp
+__pycache__/
 .hermes-ui-input/
+.codex/

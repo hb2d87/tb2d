@@ -1,6 +1,6 @@
 use crate::{
     app::App,
-    input::{map_key, Action},
+    input::{map_control_key, Action, ControlAction, map_key},
     layout::Layout,
     render,
     session::SessionStore,
@@ -88,7 +88,7 @@ fn handle_pending_events(app: &mut App, layout: &Layout, store: &SessionStore) -
             }
         };
         events_read += 1;
-        handle_event(app, layout, event, &mut pending_scroll)?;
+        handle_event(app, layout, store, event, &mut pending_scroll)?;
         if app.should_quit {
             break;
         }
@@ -116,16 +116,24 @@ fn handle_pending_events(app: &mut App, layout: &Layout, store: &SessionStore) -
 fn handle_event(
     app: &mut App,
     layout: &Layout,
+    store: &SessionStore,
     event: Event,
     pending_scroll: &mut PendingScroll,
 ) -> Result<()> {
     match event {
+        Event::Key(key)
+            if app.control_mode && matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+        {
+            handle_control_action(app, layout, store, map_control_key(key));
+        }
         Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
             match map_key(key) {
                 Action::Quit => app.should_quit = true,
+                Action::EnterControlMode => app.enter_control_mode(),
                 Action::Move(direction) => app.move_focus(direction),
                 Action::ResizeColumn(grow) => app.resize_focused_column(layout, grow),
                 Action::ResetColumnWidth => app.reset_focused_column_width(),
+                Action::ToggleZoom => app.toggle_focused_zoom(),
                 Action::ScrollPane(direction) => app.scroll_focused_pane(direction),
                 Action::ReorderPane(direction) => app.reorder_focused_pane(direction),
                 Action::CyclePresentation => app.cycle_focused_presentation(),
@@ -153,6 +161,102 @@ fn handle_event(
         _ => {}
     }
     Ok(())
+}
+
+fn handle_control_action(
+    app: &mut App,
+    layout: &Layout,
+    store: &SessionStore,
+    action: ControlAction,
+) {
+    match action {
+        ControlAction::Cancel => {
+            app.exit_control_mode();
+            app.set_status("control cancelled");
+        }
+        ControlAction::ToggleZoom => {
+            app.toggle_focused_zoom();
+            app.exit_control_mode();
+        }
+        ControlAction::AddPane => {
+            match app.add_pane_after_focus(layout) {
+                Ok(()) => note(
+                    store,
+                    "pane-added",
+                    &[("column", json!(app.focus.column)), ("pane", json!(app.focus.pane))],
+                ),
+                Err(error) => {
+                    warn!(%error, "failed to add pane");
+                    app.set_status("add pane failed");
+                    note(store, "pane-add-failed", &[("error", json!(error.to_string()))]);
+                }
+            }
+            app.exit_control_mode();
+        }
+        ControlAction::AddColumn => {
+            match app.add_column_after_focus(layout) {
+                Ok(()) => note(store, "column-added", &[("column", json!(app.focus.column))]),
+                Err(error) => {
+                    warn!(%error, "failed to add column");
+                    app.set_status("add column failed");
+                    note(store, "column-add-failed", &[("error", json!(error.to_string()))]);
+                }
+            }
+            app.exit_control_mode();
+        }
+        ControlAction::MovePane(direction) => {
+            app.move_focused_pane_to_column(direction);
+            note(
+                store,
+                "pane-moved",
+                &[("column", json!(app.focus.column)), ("pane", json!(app.focus.pane))],
+            );
+            app.exit_control_mode();
+        }
+        ControlAction::MoveColumn(direction) => {
+            app.move_focused_column(direction);
+            note(store, "column-moved", &[("column", json!(app.focus.column))]);
+            app.exit_control_mode();
+        }
+        ControlAction::ResizePane(grow) => {
+            app.resize_focused_pane(grow);
+            app.exit_control_mode();
+        }
+        ControlAction::ResizeColumn(grow) => {
+            app.resize_focused_column(layout, grow);
+            app.set_status(if grow { "column grew" } else { "column shrank" });
+            app.exit_control_mode();
+        }
+        ControlAction::ResetSpace => {
+            app.reset_focused_space();
+            app.exit_control_mode();
+        }
+        ControlAction::CycleLayout => {
+            app.cycle_focused_layout();
+            app.exit_control_mode();
+        }
+        ControlAction::CyclePresentation => {
+            app.cycle_focused_presentation();
+            app.exit_control_mode();
+        }
+        ControlAction::SaveSession => {
+            match store.save(&app.session_state()) {
+                Ok(()) => {
+                    app.set_status("session saved");
+                    note(store, "manual-save", &[("status", json!("ok"))]);
+                }
+                Err(error) => {
+                    warn!(%error, "failed to manually save session");
+                    app.set_status("session save failed");
+                    note(store, "manual-save-failed", &[("error", json!(error.to_string()))]);
+                }
+            }
+            app.exit_control_mode();
+        }
+        ControlAction::Ignore => {
+            app.set_status("unknown control key");
+        }
+    }
 }
 
 #[derive(Debug, Default)]

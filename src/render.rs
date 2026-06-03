@@ -6,7 +6,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -62,6 +62,9 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &Layout) {
     }
 
     draw_footer(frame, app, layout);
+    if app.control_mode {
+        draw_control_overlay(frame, app);
+    }
 }
 
 fn pane_title(app: &App, column_index: usize, pane_index: usize, exited: bool) -> Line<'static> {
@@ -262,21 +265,78 @@ fn draw_footer(frame: &mut Frame, app: &App, layout: &Layout) {
             Rect::new(0, area.height - 2, area.width, 1),
         );
     }
+    let mode = if app.control_mode {
+        "CONTROL"
+    } else if app.zoomed.is_some() {
+        "ZOOM"
+    } else {
+        "LIVE"
+    };
+    let hint = app.status_message.as_deref().unwrap_or("Alt+p control Alt+z zoom Ctrl-q exit");
     let info = format!(
-        " {} | {} / {} | {} | view {}-{}/{} | Alt+h/l move Alt+m layout Ctrl-q exit ",
+        " {} | {} | {} / {} | {} | view {}-{}/{} | {} ",
         app.workspace.name,
+        mode,
         app.workspace.columns[app.focus.column].name,
         app.workspace.columns[app.focus.column].panes[app.focus.pane].name,
         app.resize_status(layout),
         app.viewport.offset,
         app.viewport.offset.saturating_add(layout.viewport_width).min(layout.canvas_width),
         layout.canvas_width,
+        hint,
     );
     frame.render_widget(
         Paragraph::new(info)
             .style(Style::default().fg(ui.status_fg.to_color())),
         Rect::new(0, area.height - 1, area.width, 1),
     );
+}
+
+fn draw_control_overlay(frame: &mut Frame, app: &App) {
+    let area = centered_rect(frame.area(), 82, 14);
+    let ui = &app.workspace.ui;
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            " control ",
+            Style::default()
+                .fg(ui.selection_fg.to_color())
+                .bg(ui.selection_bg.to_color())
+                .add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(ui.selection_bg.to_color()));
+    let lines = vec![
+        Line::from("Space"),
+        Line::from("  z zoom pane     j / + grow pane     k / - shrink pane     0 / b reset space"),
+        Line::from(""),
+        Line::from("Structure"),
+        Line::from("  n new pane      c new column       [ / ] move pane      { / } move column"),
+        Line::from(""),
+        Line::from("Column and View"),
+        Line::from("  h shrink column l grow column    m layout    w presentation"),
+        Line::from(""),
+        Line::from("Session"),
+        Line::from("  s save now      Esc or p cancel"),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .style(Style::default().fg(ui.status_fg.to_color())),
+        area,
+    );
+}
+
+fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
 }
 
 fn column_navigation(app: &App) -> Line<'static> {

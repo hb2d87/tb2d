@@ -1,5 +1,6 @@
 use crate::{
     app::PaneViewState,
+    config::{PaneLayoutMode, Workspace},
     layout::{FocusRef, ViewportState},
 };
 use anyhow::{Context, Result};
@@ -16,6 +17,8 @@ use std::{
 pub struct SessionState {
     #[serde(default)]
     pub template: Option<PathBuf>,
+    #[serde(default, deserialize_with = "deserialize_workspace")]
+    pub workspace: Option<Workspace>,
     #[serde(default)]
     pub focus: FocusRef,
     #[serde(default)]
@@ -26,6 +29,12 @@ pub struct SessionState {
     pub pane_selections: Vec<usize>,
     #[serde(default, deserialize_with = "deserialize_pane_views")]
     pub pane_views: Vec<Vec<PaneViewState>>,
+    #[serde(default, deserialize_with = "deserialize_pane_weights")]
+    pub pane_weights: Vec<Vec<u16>>,
+    #[serde(default, deserialize_with = "deserialize_pane_layouts")]
+    pub pane_layouts: Vec<PaneLayoutMode>,
+    #[serde(default, deserialize_with = "deserialize_zoomed")]
+    pub zoomed: Option<FocusRef>,
 }
 
 #[derive(Debug, Clone)]
@@ -155,6 +164,34 @@ where
     deserialize_vec_or_default(deserializer)
 }
 
+fn deserialize_pane_weights<'de, D>(deserializer: D) -> std::result::Result<Vec<Vec<u16>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_vec_or_default(deserializer)
+}
+
+fn deserialize_pane_layouts<'de, D>(deserializer: D) -> std::result::Result<Vec<PaneLayoutMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserialize_vec_or_default(deserializer)
+}
+
+fn deserialize_workspace<'de, D>(deserializer: D) -> std::result::Result<Option<Workspace>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<Workspace>::deserialize(deserializer).ok().flatten())
+}
+
+fn deserialize_zoomed<'de, D>(deserializer: D) -> std::result::Result<Option<FocusRef>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<FocusRef>::deserialize(deserializer).ok().flatten())
+}
+
 fn deserialize_vec_or_default<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -200,11 +237,20 @@ mod tests {
         let store = SessionStore::at(path.clone());
         let expected = SessionState {
             template: Some(PathBuf::from("/tmp/workspace.yaml")),
+            workspace: Some(
+                Workspace::parse(
+                    "columns:\n  - name: runtime\n    width: 40\n    panes:\n      - name: shell\n",
+                )
+                .unwrap(),
+            ),
             focus: FocusRef { column: 2, pane: 1 },
             viewport: ViewportState { offset: 42 },
             column_widths: vec![None, Some(72), None],
             pane_selections: vec![1, 0, 2],
             pane_views: vec![vec![PaneViewState::default()]],
+            pane_weights: vec![vec![1, 2]],
+            pane_layouts: vec![PaneLayoutMode::Carousel],
+            zoomed: Some(FocusRef { column: 0, pane: 0 }),
         };
         store.save(&expected).unwrap();
         assert_eq!(store.load().unwrap(), expected);
@@ -237,19 +283,37 @@ mod tests {
     }
 
     #[test]
-    fn tolerates_missing_and_malformed_width_arrays() {
+    fn tolerates_missing_and_malformed_restored_runtime_fields() {
         let missing: SessionState = serde_json::from_str(
             r#"{"focus":{"column":1,"pane":0},"viewport":{"offset":12}}"#,
         ).unwrap();
         let malformed: SessionState = serde_json::from_str(
-            r#"{"focus":{"column":1,"pane":0},"viewport":{"offset":12},"column_widths":"oops","pane_selections":"oops","pane_views":"oops"}"#,
+            r#"{
+                "focus": {"column": 1, "pane": 0},
+                "viewport": {"offset": 12},
+                "workspace": "oops",
+                "column_widths": "oops",
+                "pane_selections": "oops",
+                "pane_views": "oops",
+                "pane_weights": "oops",
+                "pane_layouts": "oops",
+                "zoomed": "oops"
+            }"#,
         ).unwrap();
+        assert_eq!(missing.workspace, None);
+        assert_eq!(malformed.workspace, None);
         assert_eq!(missing.column_widths, Vec::<Option<u16>>::new());
         assert_eq!(malformed.column_widths, Vec::<Option<u16>>::new());
         assert_eq!(missing.pane_selections, Vec::<usize>::new());
         assert_eq!(missing.pane_views, Vec::<Vec<PaneViewState>>::new());
+        assert_eq!(missing.pane_weights, Vec::<Vec<u16>>::new());
+        assert_eq!(missing.pane_layouts, Vec::<PaneLayoutMode>::new());
         assert_eq!(malformed.pane_selections, Vec::<usize>::new());
         assert_eq!(malformed.pane_views, Vec::<Vec<PaneViewState>>::new());
+        assert_eq!(malformed.pane_weights, Vec::<Vec<u16>>::new());
+        assert_eq!(malformed.pane_layouts, Vec::<PaneLayoutMode>::new());
+        assert_eq!(missing.zoomed, None);
+        assert_eq!(malformed.zoomed, None);
     }
 
     #[test]
@@ -258,6 +322,7 @@ mod tests {
             r#"{"focus":{"column":1,"pane":0},"viewport":{"offset":12}}"#,
         ).unwrap();
         assert_eq!(state.template, None);
+        assert_eq!(state.workspace, None);
     }
 
     #[test]

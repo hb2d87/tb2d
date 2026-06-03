@@ -1,0 +1,50 @@
+name: ci
+
+"on":
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test and package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: test
+        run: cargo test --locked --lib
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: build release binary
+        run: cargo build --locked --release
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: check installer syntax
+        run: sh -n scripts/install.sh
+
+      - name: check release packager syntax
+        run: python3 -m py_compile scripts/package-release.py
+
+      - name: package release archive
+        run: |
+          python3 scripts/package-release.py \
+            --binary target/release/tb2d \
+            --out-dir dist \
+            --version "ci" \
+            --platform "linux-x86_64"
+
+      - name: inspect packaged archive
+        run: |
+          tar -tzf dist/tb2d-ci-linux-x86_64.tar.gz | sort

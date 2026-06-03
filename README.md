@@ -51,7 +51,8 @@ tb2d --session main
 
 Use `Alt+h/j/k/l` or `Alt+Arrow` to change focus, and click a pane to focus it.
 The viewport eases into focus changes instead of jumping abruptly. Press
-`Ctrl+q` to exit.
+`Ctrl+q` to exit. Press `Alt+p` to open control mode, a small in-app cheat
+sheet for space, layout, and session actions.
 
 Column controls:
 
@@ -63,10 +64,30 @@ Column controls:
 Pane controls:
 
 - `Alt+j/k` or `Alt+Down/Up` moves between panes in the focused column.
-- `Alt+PageUp` / `Alt+PageDown` or the mouse wheel scrolls the focused pane vertically.
-- `Alt+Shift+h/l`, `Alt+Shift+Left/Right`, or horizontal wheel events scroll it horizontally.
+- `Alt+z` zooms the focused pane to the full viewport; press it again to
+  restore the layout.
+- `Alt+PageUp` / `Alt+PageDown` or the mouse wheel scrolls the focused pane
+  vertically.
+- `Alt+Shift+h/l`, `Alt+Shift+Left/Right`, or horizontal wheel events scroll
+  it horizontally.
 - `Alt+w` cycles `symbols`, `words`, and `horizontal` content presentation.
 - `Alt+Shift+k/j` or `Alt+Shift+Up/Down` reorders the focused pane within its column.
+
+Control mode:
+
+- `z` toggles pane zoom.
+- `n` creates a pane after the focused pane.
+- `c` creates a column after the focused column.
+- `[` / `]` or `,` / `.` moves the focused pane to the previous or next column.
+- `{` / `}` moves the focused column left or right.
+- `j` or `+` grows the focused pane in `fit` layout.
+- `k` or `-` shrinks the focused pane in `fit` layout.
+- `h` and `l` resize the focused column.
+- `m` cycles layout mode, and `w` cycles content presentation.
+- `0` or `b` resets the focused column's space: column width, pane weights,
+  and zoom.
+- `s` saves the current session immediately.
+- `Esc` or `p` exits control mode without applying another action.
 
 `fit` is a vertical stack. `tabs` shows only the selected pane. `carousel`
 shows the selected pane with compact neighboring previews. Pane selection is
@@ -76,7 +97,11 @@ remembered independently for each column.
 
 When you run with `--session`, TB2D autosaves every 5 seconds and once more on
 exit. The saved session remembers the template path, focus, viewport offset,
-column width overrides, selected pane per column, and pane scroll positions.
+runtime workspace shape, column width overrides, selected pane per column,
+runtime layout modes, fit pane weights, zoomed pane, and pane scroll positions.
+Runtime workspace shape includes columns and panes created from control mode.
+Passing a new `--template` starts from that YAML again and replaces the saved
+runtime workspace snapshot on the next save.
 
 Session state is written under the platform state directory as
 `tb2d/<session>.json`. Runtime diagnostics are written next to it as
@@ -96,6 +121,22 @@ Release archives remain usable without the installer:
 ```bash
 tar -xzf tb2d-vX.Y.Z-linux-x86_64.tar.gz
 ./tb2d-vX.Y.Z-linux-x86_64/tb2d
+```
+
+## Development checks
+
+Before opening a PR, run the same checks used by CI:
+
+```bash
+cargo test --locked --lib
+cargo build --locked --release
+sh -n scripts/install.sh
+python3 -m py_compile scripts/package-release.py
+python3 scripts/package-release.py \
+  --binary target/release/tb2d \
+  --out-dir dist \
+  --version ci \
+  --platform linux-x86_64
 ```
 
 ## Workspace YAML

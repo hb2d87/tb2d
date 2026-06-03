@@ -1,7 +1,7 @@
 use crate::{
-    config::{PaneLayoutMode, Workspace},
+    config::{ColumnConfig, PaneConfig, PaneLayoutMode, WidthPolicy, Workspace},
     input::Direction,
-    layout::{FocusRef, Layout, ViewportState},
+    layout::{ColumnLayout, FocusRef, Layout, ViewportState},
     pty::{PaneId, PtyEvent, PtyManager},
     session::SessionState,
 };
@@ -17,6 +17,9 @@ const MIN_COLUMN_WIDTH: u16 = 12;
 const COLUMN_RESIZE_STEP: u16 = 4;
 const VERTICAL_SCROLL_STEP: usize = 3;
 const HORIZONTAL_SCROLL_STEP: u16 = 4;
+const PANE_WEIGHT_STEP: u16 = 1;
+const MAX_PANE_WEIGHT: u16 = 24;
+const TEMP_PANE_ID: PaneId = usize::MAX;
 
 pub struct PaneRuntime {
     pub id: PaneId,
@@ -70,6 +73,10 @@ pub struct App {
     pub column_widths: Vec<Option<u16>>,
     pub pane_selections: Vec<usize>,
     pub pane_layouts: Vec<PaneLayoutMode>,
+    pub pane_weights: Vec<Vec<u16>>,
+    pub zoomed: Option<FocusRef>,
+    pub control_mode: bool,
+    pub status_message: Option<String>,
     pub panes: HashMap<PaneId, PaneRuntime>,
     pub should_quit: bool,
     restored_pane_views: Vec<Vec<PaneViewState>>,
@@ -84,7 +91,9 @@ impl App {
         let column_widths = normalize_column_widths(&workspace, restored.column_widths);
         let pane_selections = normalize_pane_selections(&workspace, restored.pane_selections);
         let restored_pane_views = normalize_pane_views(&workspace, restored.pane_views);
-        let pane_layouts = workspace.columns.iter().map(|column| column.layout).collect();
+        let pane_layouts = normalize_pane_layouts(&workspace, restored.pane_layouts);
+        let pane_weights = normalize_pane_weights(&workspace, restored.pane_weights);
+        let zoomed = normalize_zoomed(&workspace, restored.zoomed);
         let mut app = Self {
             workspace,
             focus: restored.focus,
@@ -94,6 +103,10 @@ impl App {
             column_widths,
             pane_selections,
             pane_layouts,
+            pane_weights,
+            zoomed,
+            control_mode: false,
+            status_message: None,
             panes: HashMap::new(),
             should_quit: false,
             restored_pane_views,
@@ -135,10 +148,14 @@ impl App {
     pub fn session_state(&self) -> SessionState {
         SessionState {
             template: self.session_template.clone(),
+            workspace: Some(self.workspace.clone()),
             focus: self.focus,
             viewport: ViewportState { offset: self.viewport_target },
             column_widths: self.column_widths.clone(),
             pane_selections: self.pane_selections.clone(),
+            pane_layouts: self.pane_layouts.clone(),
+            pane_weights: self.pane_weights.clone(),
+            zoomed: self.zoomed,
             pane_views: self
                 .workspace
                 .columns
@@ -170,12 +187,27 @@ impl App {
     }
 
     pub fn pane_rects(&self, layout: &Layout, column: usize) -> Vec<Option<Rect>> {
-        layout.pane_rects_with_mode(
-            column,
-            self.pane_selections[column],
-            self.workspace.peek,
-            self.pane_layouts[column],
-        )
+        let Some(column_config) = self.workspace.columns.get(column) else { return Vec::new() };
+        if let Some(zoomed) = self.zoomed {
+            let mut panes = vec![None; column_config.panes.len()];
+            if zoomed.column == column && zoomed.pane < panes.len() {
+                panes[zoomed.pane] = Some(Rect::new(
+                    self.viewport.offset,
+                    0,
+                    layout.viewport_width,
+                    layout.content_height,
+                ));
+            }
+            return panes;
+        }
+        if self.pane_layouts[column] == PaneLayoutMode::Fit {
+            return weighted_fit_pane_rects(
+                &layout.columns[column],
+                layout.content_height,
+                &self.pane_weights[column],
+            );
+        }
+        layout.pane_rects_with_mode(column, self.pane_selections[column], self.workspace.peek, self.pane_layouts[column])
     }
 
     pub fn focused_pane_id(&self) -> PaneId {
@@ -246,6 +278,9 @@ impl App {
         }
         self.clamp_focus();
         self.pane_selections[self.focus.column] = self.focus.pane;
+        if self.zoomed.is_some() {
+            self.zoomed = Some(self.focus);
+        }
     }
 
     pub fn focus_at(&mut self, layout: &Layout, screen_x: u16, screen_y: u16) {
@@ -287,6 +322,60 @@ impl App {
 
     pub fn reset_focused_column_width(&mut self) {
         self.column_widths[self.focus.column] = None;
+        self.set_status("column width reset");
+    }
+
+    pub fn resize_focused_pane(&mut self, grow: bool) {
+        let column = self.focus.column;
+        let pane = self.focus.pane;
+        if self.pane_layouts[column] != PaneLayoutMode::Fit {
+            self.pane_layouts[column] = PaneLayoutMode::Fit;
+        }
+        let weights = &mut self.pane_weights[column];
+        if weights.is_empty() || pane >= weights.len() {
+            return;
+        }
+        if grow {
+            weights[pane] = weights[pane].saturating_add(PANE_WEIGHT_STEP).min(MAX_PANE_WEIGHT);
+            self.set_status("focused pane grew");
+        } else if weights[pane] > 1 {
+            weights[pane] = weights[pane].saturating_sub(PANE_WEIGHT_STEP).max(1);
+            self.set_status("focused pane shrank");
+        } else {
+            for (index, weight) in weights.iter_mut().enumerate() {
+                if index != pane {
+                    *weight = weight.saturating_add(PANE_WEIGHT_STEP).min(MAX_PANE_WEIGHT);
+                }
+            }
+            self.set_status("neighbor panes grew");
+        }
+    }
+
+    pub fn reset_focused_space(&mut self) {
+        let column = self.focus.column;
+        self.column_widths[column] = None;
+        self.pane_weights[column].fill(1);
+        self.zoomed = None;
+        self.set_status("focused column space reset");
+    }
+
+    pub fn toggle_focused_zoom(&mut self) {
+        let focus = self.focus;
+        self.zoomed = if self.zoomed == Some(focus) { None } else { Some(focus) };
+        self.set_status(if self.zoomed.is_some() { "pane zoomed" } else { "pane zoom cleared" });
+    }
+
+    pub fn enter_control_mode(&mut self) {
+        self.control_mode = true;
+        self.status_message = None;
+    }
+
+    pub fn exit_control_mode(&mut self) {
+        self.control_mode = false;
+    }
+
+    pub fn set_status(&mut self, message: impl Into<String>) {
+        self.status_message = Some(message.into());
     }
 
     pub fn scroll_focused_pane(&mut self, direction: Direction) {
@@ -344,6 +433,8 @@ impl App {
     pub fn cycle_focused_presentation(&mut self) {
         if let Some(pane) = self.panes.get_mut(&self.focused_pane_id()) {
             pane.view.presentation = pane.view.presentation.next();
+            let label = pane.view.presentation.label();
+            self.set_status(format!("presentation: {label}"));
         }
     }
 
@@ -354,6 +445,172 @@ impl App {
             PaneLayoutMode::Tabs => PaneLayoutMode::Carousel,
             PaneLayoutMode::Carousel => PaneLayoutMode::Fit,
         };
+        let label = layout.label();
+        self.set_status(format!("layout: {label}"));
+    }
+
+    pub fn add_pane_after_focus(&mut self, layout: &Layout) -> Result<()> {
+        let column = self.focus.column;
+        let insert_at = self.focus.pane.saturating_add(1);
+        let old_len = self.workspace.columns[column].panes.len();
+        let pane = PaneConfig {
+            name: unique_pane_name(&self.workspace.columns[column], "pane"),
+            command: default_shell_command(),
+        };
+
+        self.workspace.columns[column].panes.insert(insert_at, pane);
+        self.restored_pane_views[column].insert(insert_at, PaneViewState::default());
+        self.pane_weights[column].insert(insert_at, 1);
+        for pane_index in (insert_at..old_len).rev() {
+            self.rename_runtime_pane(pane_id(column, pane_index), pane_id(column, pane_index + 1));
+        }
+        self.focus = FocusRef { column, pane: insert_at };
+        self.pane_selections[column] = insert_at;
+        if self.zoomed.is_some() {
+            self.zoomed = Some(self.focus);
+        }
+
+        let updated_layout = self.updated_layout(layout)?;
+        self.spawn_runtime_pane(column, insert_at, &updated_layout)?;
+        self.set_status("pane added");
+        Ok(())
+    }
+
+    pub fn add_column_after_focus(&mut self, layout: &Layout) -> Result<()> {
+        let insert_at = self.focus.column.saturating_add(1);
+        let old_len = self.workspace.columns.len();
+        for column_index in (insert_at..old_len).rev() {
+            for pane_index in (0..self.workspace.columns[column_index].panes.len()).rev() {
+                self.rename_runtime_pane(
+                    pane_id(column_index, pane_index),
+                    pane_id(column_index + 1, pane_index),
+                );
+            }
+        }
+
+        self.workspace.columns.insert(insert_at, ColumnConfig {
+            name: unique_column_name(&self.workspace, "column"),
+            layout: PaneLayoutMode::Fit,
+            width: WidthPolicy::Preset("medium".to_owned()),
+            panes: vec![PaneConfig {
+                name: "terminal".to_owned(),
+                command: default_shell_command(),
+            }],
+        });
+        self.column_widths.insert(insert_at, None);
+        self.pane_selections.insert(insert_at, 0);
+        self.pane_layouts.insert(insert_at, PaneLayoutMode::Fit);
+        self.pane_weights.insert(insert_at, vec![1]);
+        self.restored_pane_views.insert(insert_at, vec![PaneViewState::default()]);
+        self.focus = FocusRef { column: insert_at, pane: 0 };
+        if self.zoomed.is_some() {
+            self.zoomed = Some(self.focus);
+        }
+
+        let updated_layout = self.updated_layout(layout)?;
+        self.spawn_runtime_pane(insert_at, 0, &updated_layout)?;
+        self.set_status("column added");
+        Ok(())
+    }
+
+    pub fn move_focused_pane_to_column(&mut self, direction: Direction) {
+        let target_column = match direction {
+            Direction::Left => self.focus.column.checked_sub(1),
+            Direction::Right => (self.focus.column + 1 < self.workspace.columns.len())
+                .then_some(self.focus.column + 1),
+            _ => None,
+        };
+        let Some(target_column) = target_column else {
+            self.set_status("no column in that direction");
+            return;
+        };
+        let source_column = self.focus.column;
+        let source_pane = self.focus.pane;
+        if self.workspace.columns[source_column].panes.len() <= 1 {
+            self.set_status("cannot move the last pane from a column");
+            return;
+        }
+
+        let target_insert = self.pane_selections[target_column]
+            .saturating_add(1)
+            .min(self.workspace.columns[target_column].panes.len());
+        let moved_pane = self.workspace.columns[source_column].panes.remove(source_pane);
+        let moved_view = self.restored_pane_views[source_column].remove(source_pane);
+        let moved_weight = self.pane_weights[source_column].remove(source_pane);
+        self.rename_runtime_pane(pane_id(source_column, source_pane), TEMP_PANE_ID);
+
+        let source_old_len = self.workspace.columns[source_column].panes.len() + 1;
+        for pane_index in source_pane + 1..source_old_len {
+            self.rename_runtime_pane(
+                pane_id(source_column, pane_index),
+                pane_id(source_column, pane_index - 1),
+            );
+        }
+        let target_old_len = self.workspace.columns[target_column].panes.len();
+        for pane_index in (target_insert..target_old_len).rev() {
+            self.rename_runtime_pane(
+                pane_id(target_column, pane_index),
+                pane_id(target_column, pane_index + 1),
+            );
+        }
+
+        self.workspace.columns[target_column].panes.insert(target_insert, moved_pane);
+        self.restored_pane_views[target_column].insert(target_insert, moved_view);
+        self.pane_weights[target_column].insert(target_insert, moved_weight);
+        self.rename_runtime_pane(TEMP_PANE_ID, pane_id(target_column, target_insert));
+        self.pane_selections[source_column] = self.pane_selections[source_column]
+            .min(self.workspace.columns[source_column].panes.len() - 1);
+        self.focus = FocusRef { column: target_column, pane: target_insert };
+        self.pane_selections[target_column] = target_insert;
+        if self.zoomed.is_some() {
+            self.zoomed = Some(self.focus);
+        }
+        self.set_status("pane moved");
+    }
+
+    pub fn move_focused_column(&mut self, direction: Direction) {
+        let target = match direction {
+            Direction::Left => self.focus.column.checked_sub(1),
+            Direction::Right => (self.focus.column + 1 < self.workspace.columns.len())
+                .then_some(self.focus.column + 1),
+            _ => None,
+        };
+        let Some(target) = target else {
+            self.set_status("no column in that direction");
+            return;
+        };
+        let source = self.focus.column;
+        let source_len = self.workspace.columns[source].panes.len();
+        let target_len = self.workspace.columns[target].panes.len();
+
+        for pane_index in 0..source_len {
+            self.rename_runtime_pane(pane_id(source, pane_index), temp_pane_id(pane_index));
+        }
+        for pane_index in 0..target_len {
+            self.rename_runtime_pane(pane_id(target, pane_index), pane_id(source, pane_index));
+        }
+        for pane_index in 0..source_len {
+            self.rename_runtime_pane(temp_pane_id(pane_index), pane_id(target, pane_index));
+        }
+
+        self.workspace.columns.swap(source, target);
+        self.column_widths.swap(source, target);
+        self.pane_selections.swap(source, target);
+        self.pane_layouts.swap(source, target);
+        self.pane_weights.swap(source, target);
+        self.restored_pane_views.swap(source, target);
+        self.focus.column = target;
+        self.focus.pane = self.focus.pane.min(self.workspace.columns[target].panes.len() - 1);
+        self.pane_selections[target] = self.focus.pane;
+        self.zoomed = self.zoomed.map(|mut zoomed| {
+            if zoomed.column == source {
+                zoomed.column = target;
+            } else if zoomed.column == target {
+                zoomed.column = source;
+            }
+            zoomed
+        });
+        self.set_status("column moved");
     }
 
     pub fn reorder_focused_pane(&mut self, direction: Direction) {
@@ -368,6 +625,8 @@ impl App {
             return;
         }
         self.workspace.columns[column].panes.swap(pane, target);
+        self.restored_pane_views[column].swap(pane, target);
+        self.pane_weights[column].swap(pane, target);
         let left = pane_id(column, pane);
         let right = pane_id(column, target);
         self.ptys.swap(left, right);
@@ -390,6 +649,60 @@ impl App {
         }
         self.focus.pane = target;
         self.pane_selections[column] = target;
+        if self.zoomed.is_some() {
+            self.zoomed = Some(self.focus);
+        }
+    }
+
+    fn updated_layout(&self, layout: &Layout) -> Result<Layout> {
+        Layout::calculate_with_widths(
+            &self.workspace,
+            layout.viewport_width,
+            layout.content_height,
+            &self.column_widths,
+        )
+    }
+
+    fn spawn_runtime_pane(&mut self, column: usize, pane: usize, layout: &Layout) -> Result<()> {
+        let id = pane_id(column, pane);
+        let fallback = layout.columns[column].panes[pane];
+        let rect = self
+            .pane_rects(layout, column)
+            .get(pane)
+            .copied()
+            .flatten()
+            .unwrap_or(fallback);
+        let cols = rect.width.saturating_sub(2).max(1);
+        let rows = rect.height.saturating_sub(2).max(1);
+        let pane_config = &self.workspace.columns[column].panes[pane];
+        self.ptys.spawn(id, &pane_config.command, cols, rows)?;
+        self.event_routes.insert(id, id);
+        self.panes.insert(id, PaneRuntime {
+            id,
+            name: pane_config.name.clone(),
+            command: pane_config.command.clone(),
+            terminal: vt100::Parser::new(rows, cols, SCROLLBACK_LINES),
+            exited: false,
+            view: PaneViewState::default(),
+            scrollback_max: 0,
+        });
+        Ok(())
+    }
+
+    fn rename_runtime_pane(&mut self, old: PaneId, new: PaneId) {
+        if old == new {
+            return;
+        }
+        if let Some(mut runtime) = self.panes.remove(&old) {
+            runtime.id = new;
+            self.panes.insert(new, runtime);
+        }
+        self.ptys.rename(old, new);
+        for routed in self.event_routes.values_mut() {
+            if *routed == old {
+                *routed = new;
+            }
+        }
     }
 
     pub fn resize_panes(&mut self, layout: &Layout) {
@@ -435,6 +748,13 @@ impl App {
     fn clamp_focus(&mut self) {
         self.focus.column = self.focus.column.min(self.workspace.columns.len() - 1);
         self.focus.pane = self.focus.pane.min(self.workspace.columns[self.focus.column].panes.len() - 1);
+        if let Some(zoomed) = self.zoomed {
+            if zoomed.column >= self.workspace.columns.len()
+                || zoomed.pane >= self.workspace.columns[zoomed.column].panes.len()
+            {
+                self.zoomed = None;
+            }
+        }
         self.pane_selections[self.focus.column] = self.focus.pane;
     }
 }
@@ -470,8 +790,75 @@ fn visible_row_limit(pane: &PaneRuntime) -> usize {
     usize::from(pane.terminal.screen().size().0)
 }
 
+fn weighted_fit_pane_rects(
+    column: &ColumnLayout,
+    height: u16,
+    weights: &[u16],
+) -> Vec<Option<Rect>> {
+    let count = column.panes.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    let mut heights = weighted_heights(height, weights, count);
+    let mut y = 0;
+    heights
+        .drain(..)
+        .map(|pane_height| {
+            let rect = Rect::new(column.x, y, column.width, pane_height);
+            y = y.saturating_add(pane_height);
+            Some(rect)
+        })
+        .collect()
+}
+
+fn weighted_heights(height: u16, weights: &[u16], count: usize) -> Vec<u16> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let count_u16 = count.min(u16::MAX as usize) as u16;
+    let base: u16 = if height >= count_u16.saturating_mul(3) {
+        3
+    } else if height >= count_u16 {
+        1
+    } else {
+        0
+    };
+    let mut heights = vec![base; count];
+    let mut remaining = height.saturating_sub(base.saturating_mul(count_u16));
+    let normalized = normalize_weights(weights, count);
+    let total_weight = normalized.iter().map(|weight| usize::from(*weight)).sum::<usize>().max(1);
+    for (index, weight) in normalized.iter().enumerate() {
+        let share = (usize::from(remaining) * usize::from(*weight)) / total_weight;
+        heights[index] = heights[index].saturating_add(share.min(u16::MAX as usize) as u16);
+    }
+    let used = heights.iter().copied().sum::<u16>();
+    remaining = height.saturating_sub(used);
+    let mut index = 0;
+    while remaining > 0 {
+        heights[index] = heights[index].saturating_add(1);
+        remaining -= 1;
+        index = (index + 1) % count;
+    }
+    heights
+}
+
+fn normalize_weights(weights: &[u16], count: usize) -> Vec<u16> {
+    let mut normalized = weights
+        .iter()
+        .copied()
+        .take(count)
+        .map(|weight| weight.clamp(1, MAX_PANE_WEIGHT))
+        .collect::<Vec<_>>();
+    normalized.resize(count, 1);
+    normalized
+}
+
 pub fn pane_id(column: usize, pane: usize) -> PaneId {
     (column << 16) | pane
+}
+
+fn temp_pane_id(index: usize) -> PaneId {
+    TEMP_PANE_ID.saturating_sub(index)
 }
 
 fn contains(rect: Rect, x: u16, y: u16) -> bool {
@@ -527,6 +914,79 @@ fn normalize_pane_views(workspace: &Workspace, restored: Vec<Vec<PaneViewState>>
         .collect()
 }
 
+fn normalize_pane_weights(workspace: &Workspace, restored: Vec<Vec<u16>>) -> Vec<Vec<u16>> {
+    workspace
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(column_index, column)| {
+            let mut weights = restored
+                .get(column_index)
+                .map(|weights| normalize_weights(weights, column.panes.len()))
+                .unwrap_or_else(|| vec![1; column.panes.len()]);
+            weights.resize(column.panes.len(), 1);
+            weights
+        })
+        .collect()
+}
+
+fn normalize_pane_layouts(workspace: &Workspace, restored: Vec<PaneLayoutMode>) -> Vec<PaneLayoutMode> {
+    workspace
+        .columns
+        .iter()
+        .enumerate()
+        .map(|(column_index, column)| {
+            restored.get(column_index).copied().unwrap_or(column.layout)
+        })
+        .collect()
+}
+
+fn normalize_zoomed(workspace: &Workspace, zoomed: Option<FocusRef>) -> Option<FocusRef> {
+    let zoomed = zoomed?;
+    if zoomed.column < workspace.columns.len()
+        && zoomed.pane < workspace.columns[zoomed.column].panes.len()
+    {
+        Some(zoomed)
+    } else {
+        None
+    }
+}
+
+fn unique_pane_name(column: &ColumnConfig, base: &str) -> String {
+    let existing = column
+        .panes
+        .iter()
+        .map(|pane| pane.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    unique_name(base, &existing)
+}
+
+fn unique_column_name(workspace: &Workspace, base: &str) -> String {
+    let existing = workspace
+        .columns
+        .iter()
+        .map(|column| column.name.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    unique_name(base, &existing)
+}
+
+fn unique_name(base: &str, existing: &std::collections::HashSet<&str>) -> String {
+    if !existing.contains(base) {
+        return base.to_owned();
+    }
+    for index in 2.. {
+        let candidate = format!("{base} {index}");
+        if !existing.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded name search should always find a candidate")
+}
+
+fn default_shell_command() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "sh".to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -573,6 +1033,10 @@ mod tests {
             column_widths: vec![Some(64), None],
             pane_selections: vec![0, 0],
             pane_layouts: vec![PaneLayoutMode::Fit, PaneLayoutMode::Fit],
+            pane_weights: vec![vec![1], vec![1]],
+            zoomed: None,
+            control_mode: false,
+            status_message: None,
             panes: HashMap::new(),
             should_quit: false,
             restored_pane_views: vec![vec![PaneViewState::default()], vec![PaneViewState::default()]],
@@ -588,6 +1052,10 @@ mod tests {
             column_widths: vec![None, None],
             pane_selections: vec![0, 0],
             pane_layouts: vec![PaneLayoutMode::Fit, PaneLayoutMode::Fit],
+            pane_weights: vec![vec![1], vec![1]],
+            zoomed: None,
+            control_mode: false,
+            status_message: None,
             panes: HashMap::new(),
             should_quit: false,
             restored_pane_views: vec![vec![PaneViewState::default()], vec![PaneViewState::default()]],
@@ -684,6 +1152,152 @@ mod tests {
         assert_eq!(app.workspace.columns[0].layout, PaneLayoutMode::Fit);
         app.cycle_focused_layout();
         assert_eq!(app.pane_layouts[0], PaneLayoutMode::Carousel);
+    }
+
+    #[test]
+    fn resizing_a_fit_pane_changes_its_rendered_space() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n      - name: b\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
+        assert_eq!(
+            app.pane_rects(&layout, 0),
+            vec![Some(Rect::new(0, 0, 40, 10)), Some(Rect::new(0, 10, 40, 10))]
+        );
+
+        app.move_focus(Direction::Down);
+        app.resize_focused_pane(true);
+
+        assert_eq!(app.pane_weights[0], vec![1, 2]);
+        assert_eq!(
+            app.pane_rects(&layout, 0),
+            vec![Some(Rect::new(0, 0, 40, 8)), Some(Rect::new(0, 8, 40, 12))]
+        );
+    }
+
+    #[test]
+    fn zoomed_pane_takes_the_viewport_and_hides_other_panes() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n      - name: b\n  - name: two\n    width: 40\n    panes:\n      - name: c\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
+
+        app.toggle_focused_zoom();
+
+        assert_eq!(
+            app.pane_rects(&layout, 0),
+            vec![Some(Rect::new(0, 0, 80, 20)), None]
+        );
+        assert_eq!(app.pane_rects(&layout, 1), vec![None]);
+        assert_eq!(app.session_state().zoomed, Some(FocusRef { column: 0, pane: 0 }));
+    }
+
+    #[test]
+    fn zoomed_pane_follows_keyboard_focus() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n      - name: b\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        app.toggle_focused_zoom();
+        app.move_focus(Direction::Down);
+        assert_eq!(app.focus, FocusRef { column: 0, pane: 1 });
+        assert_eq!(app.zoomed, Some(FocusRef { column: 0, pane: 1 }));
+    }
+
+    #[test]
+    fn adds_a_new_pane_after_the_focused_pane_and_persists_it() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n        command: sleep 1\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
+
+        app.add_pane_after_focus(&layout).unwrap();
+
+        assert_eq!(app.focus, FocusRef { column: 0, pane: 1 });
+        assert_eq!(app.workspace.columns[0].panes.len(), 2);
+        assert_eq!(app.workspace.columns[0].panes[1].name, "pane");
+        assert!(app.panes.contains_key(&pane_id(0, 1)));
+        assert_eq!(
+            app.session_state().workspace.unwrap().columns[0].panes.len(),
+            2
+        );
+    }
+
+    #[test]
+    fn adds_a_new_column_after_the_focused_column_and_persists_it() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n        command: sleep 1\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
+
+        app.add_column_after_focus(&layout).unwrap();
+
+        assert_eq!(app.focus, FocusRef { column: 1, pane: 0 });
+        assert_eq!(app.workspace.columns.len(), 2);
+        assert_eq!(app.workspace.columns[1].name, "column");
+        assert_eq!(app.workspace.columns[1].panes[0].name, "terminal");
+        assert!(app.panes.contains_key(&pane_id(1, 0)));
+        assert_eq!(app.session_state().workspace.unwrap().columns.len(), 2);
+    }
+
+    #[test]
+    fn moves_focused_pane_between_columns_without_emptying_the_source_column() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n      - name: b\n  - name: two\n    width: 40\n    panes:\n      - name: c\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        app.move_focus(Direction::Down);
+
+        app.move_focused_pane_to_column(Direction::Right);
+
+        assert_eq!(app.focus, FocusRef { column: 1, pane: 1 });
+        assert_eq!(
+            app.workspace.columns[0].panes.iter().map(|pane| pane.name.as_str()).collect::<Vec<_>>(),
+            vec!["a"]
+        );
+        assert_eq!(
+            app.workspace.columns[1].panes.iter().map(|pane| pane.name.as_str()).collect::<Vec<_>>(),
+            vec!["c", "b"]
+        );
+        assert_eq!(app.pane_weights[0].len(), 1);
+        assert_eq!(app.pane_weights[1].len(), 2);
+    }
+
+    #[test]
+    fn moves_focused_column_with_its_runtime_space_state() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n  - name: two\n    width: 40\n    panes:\n      - name: b\n      - name: c\n",
+        )
+        .unwrap();
+        let restored = SessionState {
+            column_widths: vec![Some(44), Some(55)],
+            pane_selections: vec![0, 1],
+            pane_weights: vec![vec![1], vec![2, 3]],
+            ..SessionState::default()
+        };
+        let mut app = App::new(workspace, restored).unwrap();
+        app.move_focus(Direction::Right);
+
+        app.move_focused_column(Direction::Left);
+
+        assert_eq!(app.focus, FocusRef { column: 0, pane: 1 });
+        assert_eq!(
+            app.workspace.columns.iter().map(|column| column.name.as_str()).collect::<Vec<_>>(),
+            vec!["two", "one"]
+        );
+        assert_eq!(app.column_widths, vec![Some(55), Some(44)]);
+        assert_eq!(app.pane_selections, vec![1, 0]);
+        assert_eq!(app.pane_weights, vec![vec![2, 3], vec![1]]);
     }
 
     #[test]
@@ -866,16 +1480,25 @@ mod tests {
         let restored = SessionState {
             focus: FocusRef { column: 0, pane: 1 },
             pane_selections: vec![99],
+            pane_layouts: vec![PaneLayoutMode::Tabs],
+            pane_weights: vec![vec![0, u16::MAX, 4]],
             pane_views: vec![vec![PaneViewState::default(), restored_view]],
+            zoomed: Some(FocusRef { column: 0, pane: 1 }),
             ..SessionState::default()
         };
         let mut app = App::new(workspace, restored).unwrap();
         assert_eq!(app.pane_selections, vec![1]);
+        assert_eq!(app.pane_layouts, vec![PaneLayoutMode::Tabs]);
+        assert_eq!(app.pane_weights, vec![vec![1, MAX_PANE_WEIGHT]]);
+        assert_eq!(app.zoomed, Some(FocusRef { column: 0, pane: 1 }));
         let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
         app.start_panes(&layout).unwrap();
         let normalized_view = PaneViewState { horizontal: MAX_HORIZONTAL_SCROLL, ..restored_view };
         assert_eq!(app.panes[&pane_id(0, 1)].view, normalized_view);
         assert_eq!(app.session_state().pane_selections, vec![1]);
         assert_eq!(app.session_state().pane_views[0][1], normalized_view);
+        assert_eq!(app.session_state().pane_layouts, vec![PaneLayoutMode::Tabs]);
+        assert_eq!(app.session_state().pane_weights, vec![vec![1, MAX_PANE_WEIGHT]]);
+        assert_eq!(app.session_state().zoomed, Some(FocusRef { column: 0, pane: 1 }));
     }
 }

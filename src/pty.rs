@@ -101,6 +101,15 @@ impl PtyManager {
         }
     }
 
+    pub fn rename(&mut self, old: PaneId, new: PaneId) {
+        if old == new {
+            return;
+        }
+        if let Some(pane) = self.panes.remove(&old) {
+            self.panes.insert(new, pane);
+        }
+    }
+
     pub fn try_recv(&self) -> Option<PtyEvent> {
         self.rx.try_recv().ok()
     }

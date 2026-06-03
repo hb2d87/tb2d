@@ -50,6 +50,7 @@ fn main() -> Result<()> {
             Default::default()
         }
     };
+    let explicit_template = cli.template.is_some();
     let template = cli
         .template
         .map(|path| {
@@ -58,21 +59,20 @@ fn main() -> Result<()> {
         })
         .transpose()?
         .or_else(|| restored.template.clone());
-    let workspace = match &template {
-        Some(path) => match Workspace::load(path) {
-            Ok(workspace) => workspace,
+    let runtime_workspace = (!explicit_template).then(|| restored.workspace.take()).flatten();
+    let workspace = match runtime_workspace {
+        Some(workspace) => match workspace.validate() {
+            Ok(()) => workspace,
             Err(error) => {
+                warn!(%error, "restored runtime workspace is invalid; using template/default");
                 let _ = store.append_diagnostic(
-                    "workspace-load-failed",
-                    &[
-                        ("template", json!(path.display().to_string())),
-                        ("error", json!(format!("{error:#}"))),
-                    ],
+                    "runtime-workspace-invalid",
+                    &[("error", json!(format!("{error:#}")))],
                 );
-                return Err(error);
+                load_workspace(&template, &store)?
             }
         },
-        None => Workspace::default_template()?,
+        None => load_workspace(&template, &store)?,
     };
     let _ = store.append_diagnostic(
         "workspace-loaded",
@@ -83,6 +83,9 @@ fn main() -> Result<()> {
         ],
     );
     restored.template = template.clone();
+    if explicit_template {
+        restored.workspace = None;
+    }
     let mut app = App::new(workspace, restored)?;
     let result = terminal::run(&mut app, &store);
     if let Err(error) = &result {
@@ -103,6 +106,25 @@ fn main() -> Result<()> {
         &[("status", json!(if result.is_ok() { "ok" } else { "terminal-error" }))],
     );
     result
+}
+
+fn load_workspace(template: &Option<std::path::PathBuf>, store: &SessionStore) -> Result<Workspace> {
+    match template {
+        Some(path) => match Workspace::load(path) {
+            Ok(workspace) => Ok(workspace),
+            Err(error) => {
+                let _ = store.append_diagnostic(
+                    "workspace-load-failed",
+                    &[
+                        ("template", json!(path.display().to_string())),
+                        ("error", json!(format!("{error:#}"))),
+                    ],
+                );
+                Err(error)
+            }
+        },
+        None => Workspace::default_template(),
+    }
 }
 
 fn install_panic_logger(store: SessionStore) {

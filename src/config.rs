@@ -1,10 +1,10 @@
 use crate::error::Tb2dError;
 use anyhow::{Context, Result};
 use ratatui::style::Color;
-use serde::{de, Deserialize, Deserializer};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::{HashMap, HashSet}, fs, path::Path};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Workspace {
     #[serde(default = "default_workspace_name")]
@@ -22,7 +22,7 @@ pub struct Workspace {
     pub columns: Vec<ColumnConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ColumnConfig {
     pub name: String,
@@ -32,7 +32,7 @@ pub struct ColumnConfig {
     pub panes: Vec<PaneConfig>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneLayoutMode {
     Fit,
@@ -46,7 +46,17 @@ impl Default for PaneLayoutMode {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+impl PaneLayoutMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fit => "fit",
+            Self::Tabs => "tabs",
+            Self::Carousel => "carousel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct UiConfig {
     pub accent: UiColor,
@@ -70,7 +80,7 @@ impl Default for UiConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UiColor {
     Reset,
@@ -116,7 +126,7 @@ impl UiColor {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaneConfig {
     pub name: String,
@@ -124,7 +134,7 @@ pub struct PaneConfig {
     pub command: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WidthPresets {
     #[serde(default = "default_small")]
     pub small: u16,
@@ -166,7 +176,7 @@ impl Workspace {
         Ok(workspace)
     }
 
-    fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if self.columns.is_empty() {
             return Err(Tb2dError::EmptyWorkspace.into());
         }
@@ -336,6 +346,28 @@ impl<'de> Deserialize<'de> for WidthPolicy {
             }
         }
         deserializer.deserialize_any(Visitor)
+    }
+}
+
+impl Serialize for WidthPolicy {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Cells(cells) => serializer.serialize_u16(*cells),
+            Self::Preset(preset) => serializer.serialize_str(preset),
+            Self::Percent { percent, min, max } => {
+                let mut value = format!("{percent}%");
+                if let Some(min) = min {
+                    value.push_str(&format!(" min={min}"));
+                }
+                if let Some(max) = max {
+                    value.push_str(&format!(" max={max}"));
+                }
+                serializer.serialize_str(&value)
+            }
+        }
     }
 }
 

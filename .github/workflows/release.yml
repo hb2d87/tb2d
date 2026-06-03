@@ -28,10 +28,21 @@ jobs:
       - name: install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: build release binary
-        run: cargo build --release
+      - name: test
+        run: cargo test --locked --lib
         env:
           CARGO_TERM_COLOR: always
+
+      - name: build release binary
+        run: cargo build --locked --release
+        env:
+          CARGO_TERM_COLOR: always
+
+      - name: check installer syntax
+        run: sh -n scripts/install.sh
+
+      - name: check release packager syntax
+        run: python3 -m py_compile scripts/package-release.py
 
       - name: package release archives
         run: |

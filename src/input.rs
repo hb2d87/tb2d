@@ -11,14 +11,33 @@ pub enum Direction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Quit,
+    EnterControlMode,
     Move(Direction),
     ResizeColumn(bool),
     ResetColumnWidth,
+    ToggleZoom,
     ScrollPane(Direction),
     ReorderPane(Direction),
     CyclePresentation,
     CycleLayout,
     Send(Vec<u8>),
+    Ignore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ControlAction {
+    Cancel,
+    ToggleZoom,
+    AddPane,
+    AddColumn,
+    MovePane(Direction),
+    MoveColumn(Direction),
+    ResizePane(bool),
+    ResizeColumn(bool),
+    ResetSpace,
+    CycleLayout,
+    CyclePresentation,
+    SaveSession,
     Ignore,
 }
 
@@ -33,6 +52,8 @@ pub fn map_key(event: KeyEvent) -> Action {
             KeyCode::Char('0') => return Action::ResetColumnWidth,
             KeyCode::Char('w') => return Action::CyclePresentation,
             KeyCode::Char('m') => return Action::CycleLayout,
+            KeyCode::Char('z') => return Action::ToggleZoom,
+            KeyCode::Char('p') => return Action::EnterControlMode,
             KeyCode::PageUp => return Action::ScrollPane(Direction::Up),
             KeyCode::PageDown => return Action::ScrollPane(Direction::Down),
             _ => {}
@@ -62,6 +83,30 @@ pub fn map_key(event: KeyEvent) -> Action {
         }
     }
     encode_key(event).map(Action::Send).unwrap_or(Action::Ignore)
+}
+
+pub fn map_control_key(event: KeyEvent) -> ControlAction {
+    match event.code {
+        KeyCode::Esc | KeyCode::Char('p') => ControlAction::Cancel,
+        KeyCode::Char('z') => ControlAction::ToggleZoom,
+        KeyCode::Char('n') => ControlAction::AddPane,
+        KeyCode::Char('c') => ControlAction::AddColumn,
+        KeyCode::Char('[') | KeyCode::Char(',') => ControlAction::MovePane(Direction::Left),
+        KeyCode::Char(']') | KeyCode::Char('.') => ControlAction::MovePane(Direction::Right),
+        KeyCode::Char('{') => ControlAction::MoveColumn(Direction::Left),
+        KeyCode::Char('}') => ControlAction::MoveColumn(Direction::Right),
+        KeyCode::Char('=') | KeyCode::Char('+') | KeyCode::Char('j') | KeyCode::Down => {
+            ControlAction::ResizePane(true)
+        }
+        KeyCode::Char('-') | KeyCode::Char('k') | KeyCode::Up => ControlAction::ResizePane(false),
+        KeyCode::Char('l') | KeyCode::Right => ControlAction::ResizeColumn(true),
+        KeyCode::Char('h') | KeyCode::Left => ControlAction::ResizeColumn(false),
+        KeyCode::Char('0') | KeyCode::Char('b') => ControlAction::ResetSpace,
+        KeyCode::Char('m') => ControlAction::CycleLayout,
+        KeyCode::Char('w') => ControlAction::CyclePresentation,
+        KeyCode::Char('s') => ControlAction::SaveSession,
+        _ => ControlAction::Ignore,
+    }
 }
 
 fn encode_key(event: KeyEvent) -> Option<Vec<u8>> {
@@ -138,8 +183,56 @@ mod tests {
             Action::ScrollPane(Direction::Up)
         );
         assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT)),
+            Action::ToggleZoom
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT)),
+            Action::EnterControlMode
+        );
+        assert_eq!(
             map_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT | KeyModifiers::SHIFT)),
             Action::ReorderPane(Direction::Down)
+        );
+    }
+
+    #[test]
+    fn maps_control_mode_shortcuts() {
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)),
+            ControlAction::ToggleZoom
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            ControlAction::ResizePane(true)
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE)),
+            ControlAction::ResizePane(false)
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)),
+            ControlAction::SaveSession
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
+            ControlAction::AddPane
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+            ControlAction::AddColumn
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE)),
+            ControlAction::MovePane(Direction::Right)
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE)),
+            ControlAction::MoveColumn(Direction::Right)
+        );
+        assert_eq!(
+            map_control_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            ControlAction::Cancel
         );
     }
 }
