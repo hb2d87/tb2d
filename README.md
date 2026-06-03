@@ -1,8 +1,30 @@
 # TB2D
 
+[![CI](https://github.com/hb2d87/tb2d/actions/workflows/ci.yml/badge.svg)](https://github.com/hb2d87/tb2d/actions/workflows/ci.yml)
+[![Release](https://github.com/hb2d87/tb2d/actions/workflows/release.yml/badge.svg)](https://github.com/hb2d87/tb2d/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 TB2D is a Rust terminal workspace manager with a horizontally scrollable strip
 of columns and PTY-backed panes. Each column can choose a pane layout mode:
 `fit` for stacked panes or `carousel` for a focused, zellij-like vertical view.
+
+It is built for terminal workspaces that need more spatial memory than a stack
+of tabs: keep a welcome pane, shell, code assistant, logs, and focused tool
+output in one sliding canvas.
+
+Highlights:
+
+- PTY-backed panes with ANSI color, common text attributes, and wide-character
+  rendering.
+- Runtime control mode for pane zoom, new panes/columns, resizing, movement,
+  layout changes, and manual saves.
+- Named sessions with autosave, restored runtime workspace shape, per-pane
+  scroll state, diagnostics, and panic logs.
+- Release archives and a curl-based installer for Linux x86_64 and Apple
+  Silicon macOS.
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes and [LICENSE](LICENSE) for
+license terms.
 
 ## Install
 
@@ -10,14 +32,14 @@ Install the latest Linux x86_64 or Apple Silicon macOS release to
 `~/.local/bin/tb2d`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hb2d/tb2d/master/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh | sh
 ```
 
 The installer accepts `--version`, `--install-dir`, and `--repo` options. For
 example, install a specific release into a custom directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hb2d/tb2d/master/scripts/install.sh |
+curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh |
   sh -s -- --version v0.1.0 --install-dir "$HOME/bin"
 ```
 
@@ -121,6 +143,23 @@ Release archives remain usable without the installer:
 ```bash
 tar -xzf tb2d-vX.Y.Z-linux-x86_64.tar.gz
 ./tb2d-vX.Y.Z-linux-x86_64/tb2d
+```
+
+## Publish a release
+
+The GitHub release workflow builds Linux x86_64 and Apple Silicon macOS
+archives when a `v*` tag is pushed:
+
+```bash
+git tag v0.1.0
+git push origin master v0.1.0
+```
+
+If this is a fresh GitHub repository, add the remote first:
+
+```bash
+git remote add origin git@github.com:hb2d87/tb2d.git
+git push -u origin master
 ```
 
 ## Development checks

@@ -2,8 +2,14 @@
 name = "tb2d"
 version = "0.1.0"
 edition = "2021"
+authors = ["hb2d <hb2d87@gmail.com>"]
 description = "A spatial terminal workspace manager"
 license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/hb2d87/tb2d"
+repository = "https://github.com/hb2d87/tb2d"
+keywords = ["terminal", "workspace", "tui", "pty"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1"

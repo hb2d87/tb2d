@@ -47,4 +47,10 @@ jobs:
 
       - name: inspect packaged archive
         run: |
-          tar -tzf dist/tb2d-ci-linux-x86_64.tar.gz | sort
+          tar -tzf dist/tb2d-ci-linux-x86_64.tar.gz | sort | tee archive.txt
+          grep -qx 'tb2d-ci-linux-x86_64/CHANGELOG.md' archive.txt
+          grep -qx 'tb2d-ci-linux-x86_64/LICENSE' archive.txt
+          grep -qx 'tb2d-ci-linux-x86_64/README.md' archive.txt
+          grep -qx 'tb2d-ci-linux-x86_64/default.yaml' archive.txt
+          grep -qx 'tb2d-ci-linux-x86_64/tb2d' archive.txt
+          grep -qx 'tb2d-ci-linux-x86_64/web-reader.yaml' archive.txt

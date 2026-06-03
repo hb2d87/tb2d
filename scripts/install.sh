@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-repo="${TB2D_REPO:-hb2d/tb2d}"
+repo="${TB2D_REPO:-hb2d87/tb2d}"
 install_dir="${TB2D_INSTALL_DIR:-$HOME/.local/bin}"
 version="${TB2D_VERSION:-latest}"
 

@@ -35,6 +35,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path, help="Path to the built tb2d binary")
     parser.add_argument("--readme", default=Path("README.md"), type=Path, help="Path to README.md")
+    parser.add_argument("--license", default=Path("LICENSE"), type=Path, help="Path to LICENSE")
+    parser.add_argument("--changelog", default=Path("CHANGELOG.md"), type=Path, help="Path to CHANGELOG.md")
     parser.add_argument(
         "--default-config",
         default=Path("examples/default.yaml"),
@@ -55,10 +57,12 @@ def main() -> int:
 
     binary = args.binary
     readme = args.readme
+    license_file = args.license
+    changelog = args.changelog
     default_config = args.default_config
     example_config = args.example_config
 
-    for path in (binary, readme, default_config, example_config):
+    for path in (binary, readme, license_file, changelog, default_config, example_config):
         if not path.exists():
             print(f"error: missing required input: {path}", file=sys.stderr)
             return 1
@@ -73,6 +77,8 @@ def main() -> int:
 
         copy_into(package_root, binary, args.name)
         copy_into(package_root, readme, "README.md")
+        copy_into(package_root, license_file, "LICENSE")
+        copy_into(package_root, changelog, "CHANGELOG.md")
         copy_into(package_root, default_config, default_config.name)
         copy_into(package_root, example_config, example_config.name)
 

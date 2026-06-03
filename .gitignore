@@ -1,4 +1,5 @@
 /target
+/dist
 *.swp
 __pycache__/
 .hermes-ui-input/
