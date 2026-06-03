@@ -23,6 +23,7 @@ pub enum Action {
     ReorderPane(Direction),
     CyclePresentation,
     CycleLayout,
+    SaveSession,
     Send(Vec<u8>),
     Ignore,
 }
@@ -69,6 +70,7 @@ pub fn map_key(event: KeyEvent) -> Action {
             KeyCode::Char('r') => return Action::EnterResizeMode,
             KeyCode::Char('n') => return Action::AddPane,
             KeyCode::Char('c') => return Action::AddColumn,
+            KeyCode::Char('s') => return Action::SaveSession,
             KeyCode::PageUp => return Action::ScrollPane(Direction::Up),
             KeyCode::PageDown => return Action::ScrollPane(Direction::Down),
             _ => {}
@@ -248,6 +250,10 @@ mod tests {
         assert_eq!(
             map_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT)),
             Action::AddColumn
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT)),
+            Action::SaveSession
         );
         assert_eq!(
             map_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT | KeyModifiers::SHIFT)),

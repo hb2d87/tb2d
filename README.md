@@ -55,8 +55,8 @@ Install the latest Linux x86_64 or Apple Silicon macOS release to
 curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh | sh
 ```
 
-The installer accepts `--version`, `--install-dir`, and `--repo` options. For
-example, install a specific release into a custom directory:
+The installer accepts `--version`, `--install-dir`, `--config-dir`, and `--repo`
+options. For example, install a specific release into a custom directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh |
@@ -65,7 +65,9 @@ curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.
 
 If the install directory is not already on your `PATH`, the installer adds it
 to your shell profile and prints the one-line `export PATH=...` command for the
-current terminal. Pass `--no-path-update` to skip profile changes.
+current terminal. It also installs starter YAML configs to
+`${XDG_CONFIG_HOME:-$HOME/.config}/tb2d` without overwriting existing files.
+Pass `--no-path-update` to skip profile changes.
 
 For local development, build and install the same `tb2d` command with Cargo:
 
@@ -84,6 +86,20 @@ tb2d
 No flags are required. The default view is `2r, 1r, 3rc, 2r`: two stacked
 welcome panes, one main terminal pane, a three-pane carousel column, and two
 stacked agent panes.
+
+Open your editable default YAML config:
+
+```bash
+tb2d --config
+```
+
+This creates `${XDG_CONFIG_HOME:-$HOME/.config}/tb2d/default.yaml` from the
+built-in default if it does not exist, then opens it in `$VISUAL`, `$EDITOR`,
+or `vi`. To print the path without opening an editor:
+
+```bash
+tb2d --config-path
+```
 
 Start or replace a named session with a YAML workspace template:
 
@@ -112,6 +128,7 @@ Column controls:
 - `Alt+0` returns the focused column to its configured width.
 - `Alt+m` cycles `fit`, `tabs`, and `carousel` layouts for the focused column.
 - `Alt+c` creates a column after the focused column.
+- `Alt+s` saves the current session immediately.
 
 Pane controls:
 
@@ -163,6 +180,12 @@ runtime layout modes, fit pane weights, zoomed pane, and pane scroll positions.
 Runtime workspace shape includes columns and panes created from control mode.
 Passing a new `--template` starts from that YAML again and replaces the saved
 runtime workspace snapshot on the next save.
+
+When there is no explicit `--template` and no remembered template in the
+session, tb2d uses the editable default config at
+`${XDG_CONFIG_HOME:-$HOME/.config}/tb2d/default.yaml`. Existing sessions keep
+their saved runtime workspace until you replace them with `--template` or edit
+the saved session state.
 
 Session state is written under the platform state directory as
 `tb2d/<session>.json`. Runtime diagnostics are written next to it as
@@ -219,7 +242,8 @@ python3 scripts/package-release.py \
 
 ## Workspace YAML
 
-Each column has a name, width, optional `fit`, `tabs`, or `carousel` layout,
+Use `tb2d --config` for the quickest way to open the default YAML. Each column
+has a name, width, optional `fit`, `tabs`, or `carousel` layout,
 and one or more panes. Widths support cell counts, the `small`, `medium`, and
 `big` presets, custom presets, and percentages with optional clamps such as
 `"55% min=42 max=72"`.
@@ -253,6 +277,20 @@ columns:
       - name: shell
         command: "${SHELL:-sh}"
 ```
+
+Pane commands run through `sh -lc`, so startup commands can be embedded per
+pane:
+
+```yaml
+panes:
+  - name: server
+    command: "cd ~/project && npm run dev"
+  - name: shell
+    command: "cd ~/project && git status; exec ${SHELL:-sh}"
+```
+
+End with `exec ${SHELL:-sh}` when you want the pane to stay open after a setup
+command finishes.
 
 tb2d uses PTYs with a `vt100` parser. It resizes pane terminals with the
 workspace, renders ANSI colors and common text attributes, preserves wide

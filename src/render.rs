@@ -276,7 +276,7 @@ fn draw_footer(frame: &mut Frame, app: &App, layout: &Layout) {
     let hint = app
         .status_message
         .as_deref()
-        .unwrap_or("Alt+p control Alt+r resize Alt+z zoom Ctrl-q exit");
+        .unwrap_or("Alt+p control Alt+r resize Alt+s save Alt+z zoom Ctrl-q exit");
     let info = format!(
         " {} | {} | {} / {} | {} | view {}-{}/{} | {} ",
         app.workspace.name,

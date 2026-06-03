@@ -2,7 +2,11 @@ use crate::error::Tb2dError;
 use anyhow::{Context, Result};
 use ratatui::style::Color;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use std::{collections::{HashMap, HashSet}, fs, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,6 +162,27 @@ pub enum WidthPolicy {
 }
 
 impl Workspace {
+    pub fn user_default_template_path() -> PathBuf {
+        let root = dirs::config_dir()
+            .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+            .unwrap_or_else(|| PathBuf::from("."));
+        root.join("tb2d").join("default.yaml")
+    }
+
+    pub fn ensure_user_default_template() -> Result<PathBuf> {
+        let path = Self::user_default_template_path();
+        if path.exists() {
+            return Ok(path);
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::write(&path, include_str!("../examples/default.yaml"))
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        Ok(path)
+    }
+
     pub fn default_template() -> Result<Self> {
         Self::parse(include_str!("../examples/default.yaml"))
             .context("invalid built-in default workspace")

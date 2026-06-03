@@ -5,9 +5,14 @@ All notable changes to tb2d will be documented in this file.
 ## Unreleased
 
 - Added Zellij-inspired live/control/resize hotkey layers, including direct
-  `Alt+n` pane creation, `Alt+c` column creation, and `Alt+r` resize mode.
+  `Alt+n` pane creation, `Alt+c` column creation, `Alt+r` resize mode, and
+  `Alt+s` session saving.
 - Updated control mode so `h/j/k/l` moves focus while resize commands live in
   the dedicated resize mode.
+- Added `tb2d --config` and `tb2d --config-path` for quickly creating and
+  editing the user default YAML config.
+- Updated the installer to seed starter YAML configs into the user config
+  directory without overwriting existing edits.
 - Added a README flow GIF that shows the horizontally scrollable workspace and
   viewport movement.
 - Documented the project as draft-stage and developed with heavy LLM

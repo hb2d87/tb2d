@@ -15,7 +15,7 @@ columns:
     width: medium
     panes:
       - name: welcome
-        command: "printf 'tb2d\\n\\nWelcome to your terminal workspace.\\n\\nNavigate: Alt+h/j/k/l\\nZoom pane: Alt+z\\nControl mode: Alt+p\\nNew pane/column: Alt+p then n/c\\nResize column: Alt+- / Alt+=\\nCycle layout: Alt+m\\nExit: Ctrl+q\\n\\n'; exec ${SHELL:-sh}"
+        command: "printf 'tb2d\\n\\nWelcome to your terminal workspace.\\n\\nNavigate: Alt+h/j/k/l\\nZoom pane: Alt+z\\nControl mode: Alt+p\\nResize mode: Alt+r\\nNew pane/column: Alt+n / Alt+c\\nCycle layout: Alt+m\\nSave session: Alt+s\\nExit: Ctrl+q\\n\\n'; exec ${SHELL:-sh}"
       - name: home
         command: "ls -la ~; exec ${SHELL:-sh}"
   - name: main terminal

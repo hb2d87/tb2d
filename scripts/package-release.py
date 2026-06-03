@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a TB2D release binary with README and workspace templates.
+"""Package a tb2d release binary with README and workspace templates.
 
 Creates both .tar.gz and .zip archives in the requested output directory.
 """

@@ -148,6 +148,7 @@ fn handle_event(
                 Action::ReorderPane(direction) => app.reorder_focused_pane(direction),
                 Action::CyclePresentation => app.cycle_focused_presentation(),
                 Action::CycleLayout => app.cycle_focused_layout(),
+                Action::SaveSession => save_session(app, store),
                 Action::Send(bytes) => app.send_input(&bytes)?,
                 Action::Ignore => {}
             }
@@ -229,17 +230,7 @@ fn handle_control_action(
             app.exit_mode();
         }
         ControlAction::SaveSession => {
-            match store.save(&app.session_state()) {
-                Ok(()) => {
-                    app.set_status("session saved");
-                    note(store, "manual-save", &[("status", json!("ok"))]);
-                }
-                Err(error) => {
-                    warn!(%error, "failed to manually save session");
-                    app.set_status("session save failed");
-                    note(store, "manual-save-failed", &[("error", json!(error.to_string()))]);
-                }
-            }
+            save_session(app, store);
             app.exit_mode();
         }
         ControlAction::Ignore => {
@@ -292,6 +283,20 @@ fn add_column(app: &mut App, layout: &Layout, store: &SessionStore) {
             warn!(%error, "failed to add column");
             app.set_status("add column failed");
             note(store, "column-add-failed", &[("error", json!(error.to_string()))]);
+        }
+    }
+}
+
+fn save_session(app: &mut App, store: &SessionStore) {
+    match store.save(&app.session_state()) {
+        Ok(()) => {
+            app.set_status("session saved");
+            note(store, "manual-save", &[("status", json!("ok"))]);
+        }
+        Err(error) => {
+            warn!(%error, "failed to manually save session");
+            app.set_status("session save failed");
+            note(store, "manual-save-failed", &[("error", json!(error.to_string()))]);
         }
     }
 }
