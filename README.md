@@ -30,21 +30,9 @@ Highlights:
 See [CHANGELOG.md](CHANGELOG.md) for release notes and [LICENSE](LICENSE) for
 license terms.
 
-## Screenshots
+## Flow
 
 ![tb2d flow](docs/assets/tb2d-flow.gif)
-
-Overview:
-
-![tb2d overview](docs/assets/tb2d-overview.png)
-
-Control mode:
-
-![tb2d control mode](docs/assets/tb2d-control-mode.png)
-
-Zoomed pane:
-
-![tb2d zoomed pane](docs/assets/tb2d-zoomed-pane.png)
 
 ## Install
 
