@@ -5,7 +5,7 @@ All notable changes to tb2d will be documented in this file.
 ## Unreleased
 
 - Simplified the README for first-time users by trimming maintainer-focused
-  release and development instructions from the front page.
+  release/development instructions and adding update/uninstall guidance.
 
 ## 0.1.2 - 2026-06-04
 

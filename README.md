@@ -35,7 +35,7 @@ license terms.
 
 ## Install
 
-Install the latest release:
+Install the latest release with one command:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh | sh
@@ -45,23 +45,33 @@ The installer puts `tb2d` in `~/.local/bin`, adds that directory to your shell
 profile if needed, and installs starter YAML configs to
 `${XDG_CONFIG_HOME:-$HOME/.config}/tb2d` without overwriting edits.
 
-To build from source instead:
-
-```bash
-cargo install --path .
-```
-
-## Run
-
-Launch the built-in four-column workspace:
+Open a new terminal after install, then run:
 
 ```bash
 tb2d
 ```
 
-No flags are required. The default view is `2r, 1r, 3rc, 2r`: two stacked
-welcome panes, one main terminal pane, a three-pane carousel column, and two
-stacked agent panes.
+Update later by running the same install command again.
+
+Remove the app:
+
+```bash
+rm -f ~/.local/bin/tb2d
+```
+
+Your editable config and saved sessions live under `~/.config/tb2d` and your
+platform state directory. Keep those if you want to reinstall later.
+
+## Run
+
+No flags are required:
+
+```bash
+tb2d
+```
+
+The default view is `2r, 1r, 3rc, 2r`: two stacked welcome panes, one main
+terminal pane, a three-pane carousel column, and two stacked agent panes.
 
 Open your editable default YAML config:
 
