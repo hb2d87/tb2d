@@ -1,5 +1,5 @@
 use crate::{
-    app::{pane_id, App, PresentationMode, MAX_HORIZONTAL_SCROLL},
+    app::{pane_id, App, AppMode, PresentationMode, MAX_HORIZONTAL_SCROLL},
     layout::Layout,
 };
 use ratatui::{
@@ -62,8 +62,10 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &Layout) {
     }
 
     draw_footer(frame, app, layout);
-    if app.control_mode {
+    if app.mode == AppMode::Control {
         draw_control_overlay(frame, app);
+    } else if app.mode == AppMode::Resize {
+        draw_resize_overlay(frame, app);
     }
 }
 
@@ -265,14 +267,16 @@ fn draw_footer(frame: &mut Frame, app: &App, layout: &Layout) {
             Rect::new(0, area.height - 2, area.width, 1),
         );
     }
-    let mode = if app.control_mode {
-        "CONTROL"
-    } else if app.zoomed.is_some() {
-        "ZOOM"
-    } else {
-        "LIVE"
+    let mode = match app.mode {
+        AppMode::Control => "CONTROL",
+        AppMode::Resize => "RESIZE",
+        AppMode::Live if app.zoomed.is_some() => "ZOOM",
+        AppMode::Live => "LIVE",
     };
-    let hint = app.status_message.as_deref().unwrap_or("Alt+p control Alt+z zoom Ctrl-q exit");
+    let hint = app
+        .status_message
+        .as_deref()
+        .unwrap_or("Alt+p control Alt+r resize Alt+s save Alt+z zoom Ctrl-q exit");
     let info = format!(
         " {} | {} | {} / {} | {} | view {}-{}/{} | {} ",
         app.workspace.name,
@@ -308,17 +312,51 @@ fn draw_control_overlay(frame: &mut Frame, app: &App) {
         .border_type(BorderType::Thick)
         .border_style(Style::default().fg(ui.selection_bg.to_color()));
     let lines = vec![
-        Line::from("Space"),
-        Line::from("  z zoom pane     j / + grow pane     k / - shrink pane     0 / b reset space"),
+        Line::from("Navigate"),
+        Line::from("  h/j/k/l or arrows focus panes and columns"),
         Line::from(""),
         Line::from("Structure"),
-        Line::from("  n new pane      c new column       [ / ] move pane      { / } move column"),
+        Line::from("  n new pane      c new column       Shift+h/l or [ / ] move pane"),
+        Line::from("  { / } move column"),
         Line::from(""),
         Line::from("Column and View"),
-        Line::from("  h shrink column l grow column    m layout    w presentation"),
+        Line::from("  r resize mode   z zoom pane        m layout    w presentation"),
+        Line::from("  0 / b reset focused space"),
         Line::from(""),
         Line::from("Session"),
         Line::from("  s save now      Esc or p cancel"),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .style(Style::default().fg(ui.status_fg.to_color())),
+        area,
+    );
+}
+
+fn draw_resize_overlay(frame: &mut Frame, app: &App) {
+    let area = centered_rect(frame.area(), 72, 10);
+    let ui = &app.workspace.ui;
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title(Line::from(Span::styled(
+            " resize ",
+            Style::default()
+                .fg(ui.selection_fg.to_color())
+                .bg(ui.selection_bg.to_color())
+                .add_modifier(Modifier::BOLD),
+        )))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(ui.selection_bg.to_color()));
+    let lines = vec![
+        Line::from("Pane size"),
+        Line::from("  j / Down / + grow focused pane     k / Up / - shrink focused pane"),
+        Line::from(""),
+        Line::from("Column width"),
+        Line::from("  h / Left shrink column             l / Right grow column"),
+        Line::from(""),
+        Line::from("  0 / b reset focused space          Esc, r, or p exit"),
     ];
     frame.render_widget(
         Paragraph::new(lines)

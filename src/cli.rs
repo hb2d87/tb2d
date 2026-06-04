@@ -13,6 +13,8 @@ pub struct Cli {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseOutcome {
     Run(Cli),
+    EditConfig,
+    PrintConfigPath,
     Help,
     Version,
 }
@@ -30,12 +32,19 @@ impl Cli {
         let mut args = args.into_iter().map(Into::into);
         let mut template = None;
         let mut session = String::from("main");
+        let mut config_action = None;
 
         while let Some(arg) = args.next() {
             let arg = arg.to_string_lossy();
             match arg.as_ref() {
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
                 "-V" | "--version" => return Ok(ParseOutcome::Version),
+                "--config" => {
+                    set_config_action(&mut config_action, ParseOutcome::EditConfig)?;
+                }
+                "--config-path" => {
+                    set_config_action(&mut config_action, ParseOutcome::PrintConfigPath)?;
+                }
                 "--template" => {
                     let Some(value) = args.next() else {
                         bail!("--template requires a path");
@@ -63,15 +72,25 @@ impl Cli {
             }
         }
 
+        if let Some(action) = config_action {
+            if template.is_some() || session != "main" {
+                bail!("--config and --config-path cannot be combined with workspace options");
+            }
+            return Ok(action);
+        }
+
         Ok(ParseOutcome::Run(Self { template, session }))
     }
 
     pub fn help() -> &'static str {
-        "TB2D - a spatial terminal workspace manager
+        "tb2d - a spatial terminal workspace manager
 
 Usage: tb2d [--template <workspace.yaml>] [--session <name>]
+       tb2d --config
 
 Options:
+  --config          Create/open the user workspace YAML in $VISUAL or $EDITOR
+  --config-path     Print the user workspace YAML path
   --template <path>  Start from a workspace template
   --session <name>   Restore and save runtime state (default: main)
   -h, --help         Print help
@@ -85,6 +104,13 @@ A session remembers its template. Pass --template again to replace it."
 fn set_template(template: &mut Option<PathBuf>, path: PathBuf) -> Result<()> {
     if template.replace(path).is_some() {
         bail!("template path was provided more than once");
+    }
+    Ok(())
+}
+
+fn set_config_action(action: &mut Option<ParseOutcome>, value: ParseOutcome) -> Result<()> {
+    if action.replace(value).is_some() {
+        bail!("config action was provided more than once");
     }
     Ok(())
 }
@@ -121,6 +147,16 @@ mod tests {
             Cli::parse_from([] as [&str; 0]).unwrap(),
             ParseOutcome::Run(Cli { template: None, session: "main".into() })
         );
+    }
+
+    #[test]
+    fn parses_config_actions() {
+        assert_eq!(Cli::parse_from(["--config"]).unwrap(), ParseOutcome::EditConfig);
+        assert_eq!(
+            Cli::parse_from(["--config-path"]).unwrap(),
+            ParseOutcome::PrintConfigPath
+        );
+        assert!(Cli::parse_from(["--config", "--session", "demo"]).is_err());
     }
 
     #[test]

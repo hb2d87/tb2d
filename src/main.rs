@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::json;
-use std::backtrace::Backtrace;
+use std::{backtrace::Backtrace, path::Path, process::Command};
 use tb2d::{
     app::App,
     cli::{Cli, ParseOutcome},
@@ -27,6 +27,15 @@ fn main() -> Result<()> {
             println!("tb2d {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
+        ParseOutcome::PrintConfigPath => {
+            println!("{}", Workspace::user_default_template_path().display());
+            return Ok(());
+        }
+        ParseOutcome::EditConfig => {
+            let path = Workspace::ensure_user_default_template()?;
+            open_editor(&path)?;
+            return Ok(());
+        }
     };
     let session_name = cli.session.clone();
     let store = SessionStore::new(cli.session);
@@ -51,6 +60,21 @@ fn main() -> Result<()> {
         }
     };
     let explicit_template = cli.template.is_some();
+    let default_template = if !explicit_template && restored.template.is_none() {
+        match Workspace::ensure_user_default_template() {
+            Ok(path) => Some(path),
+            Err(error) => {
+                warn!(%error, "failed to seed user default config; using built-in default");
+                let _ = store.append_diagnostic(
+                    "config-seed-failed",
+                    &[("error", json!(format!("{error:#}")))],
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     let template = cli
         .template
         .map(|path| {
@@ -58,7 +82,8 @@ fn main() -> Result<()> {
                 .with_context(|| format!("failed to resolve template {}", path.display()))
         })
         .transpose()?
-        .or_else(|| restored.template.clone());
+        .or_else(|| restored.template.clone())
+        .or(default_template);
     let runtime_workspace = (!explicit_template).then(|| restored.workspace.take()).flatten();
     let workspace = match runtime_workspace {
         Some(workspace) => match workspace.validate() {
@@ -106,6 +131,23 @@ fn main() -> Result<()> {
         &[("status", json!(if result.is_ok() { "ok" } else { "terminal-error" }))],
     );
     result
+}
+
+fn open_editor(path: &Path) -> Result<()> {
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_owned());
+    let status = Command::new("sh")
+        .arg("-lc")
+        .arg(format!("{editor} \"$1\""))
+        .arg("tb2d-editor")
+        .arg(path)
+        .status()
+        .with_context(|| format!("failed to open editor for {}", path.display()))?;
+    if !status.success() {
+        anyhow::bail!("editor exited with status {status}");
+    }
+    Ok(())
 }
 
 fn load_workspace(template: &Option<std::path::PathBuf>, store: &SessionStore) -> Result<Workspace> {

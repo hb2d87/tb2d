@@ -1,5 +1,4 @@
-# tb2d 
-Terminal Board 2d
+# tb2d
 
 [![CI](https://github.com/hb2d87/tb2d/actions/workflows/ci.yml/badge.svg)](https://github.com/hb2d87/tb2d/actions/workflows/ci.yml)
 [![Release](https://github.com/hb2d87/tb2d/actions/workflows/release.yml/badge.svg)](https://github.com/hb2d87/tb2d/actions/workflows/release.yml)
@@ -12,6 +11,10 @@ of columns and PTY-backed panes. Each column can choose a pane layout mode:
 It is built for terminal workspaces that need more spatial memory than a stack
 of tabs: keep a pane, shell, code assistant, logs, and focused tool
 output in one sliding canvas.
+
+Status: tb2d is currently a draft-stage project. It was developed with heavy
+LLM assistance, so expect fast iteration, active reshaping of UX details, and
+rough edges that should be validated before depending on it for critical work.
 
 Highlights:
 
@@ -27,17 +30,9 @@ Highlights:
 See [CHANGELOG.md](CHANGELOG.md) for release notes and [LICENSE](LICENSE) for
 license terms.
 
-## Screenshots
+## Flow
 
-![TB2D overview](docs/assets/tb2d-overview.png)
-
-Control mode:
-
-![TB2D control mode](docs/assets/tb2d-control-mode.png)
-
-Zoomed pane:
-
-![TB2D zoomed pane](docs/assets/tb2d-zoomed-pane.png)
+![tb2d flow](docs/assets/tb2d-flow.gif)
 
 ## Install
 
@@ -48,8 +43,8 @@ Install the latest Linux x86_64 or Apple Silicon macOS release to
 curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh | sh
 ```
 
-The installer accepts `--version`, `--install-dir`, and `--repo` options. For
-example, install a specific release into a custom directory:
+The installer accepts `--version`, `--install-dir`, `--config-dir`, and `--repo`
+options. For example, install a specific release into a custom directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh |
@@ -58,7 +53,9 @@ curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.
 
 If the install directory is not already on your `PATH`, the installer adds it
 to your shell profile and prints the one-line `export PATH=...` command for the
-current terminal. Pass `--no-path-update` to skip profile changes.
+current terminal. It also installs starter YAML configs to
+`${XDG_CONFIG_HOME:-$HOME/.config}/tb2d` without overwriting existing files.
+Pass `--no-path-update` to skip profile changes.
 
 For local development, build and install the same `tb2d` command with Cargo:
 
@@ -78,6 +75,20 @@ No flags are required. The default view is `2r, 1r, 3rc, 2r`: two stacked
 welcome panes, one main terminal pane, a three-pane carousel column, and two
 stacked agent panes.
 
+Open your editable default YAML config:
+
+```bash
+tb2d --config
+```
+
+This creates `${XDG_CONFIG_HOME:-$HOME/.config}/tb2d/default.yaml` from the
+built-in default if it does not exist, then opens it in `$VISUAL`, `$EDITOR`,
+or `vi`. To print the path without opening an editor:
+
+```bash
+tb2d --config-path
+```
+
 Start or replace a named session with a YAML workspace template:
 
 ```bash
@@ -95,7 +106,8 @@ tb2d --session main
 Use `Alt+h/j/k/l` or `Alt+Arrow` to change focus, and click a pane to focus it.
 The viewport eases into focus changes instead of jumping abruptly. Press
 `Ctrl+q` to exit. Press `Alt+p` to open control mode, a small in-app cheat
-sheet for space, layout, and session actions.
+sheet for navigation, structure, layout, and session actions. Press `Alt+r`
+to enter resize mode directly.
 
 Column controls:
 
@@ -103,6 +115,8 @@ Column controls:
 - `Alt+-` and `Alt+=` resize the focused column.
 - `Alt+0` returns the focused column to its configured width.
 - `Alt+m` cycles `fit`, `tabs`, and `carousel` layouts for the focused column.
+- `Alt+c` creates a column after the focused column.
+- `Alt+s` saves the current session immediately.
 
 Pane controls:
 
@@ -114,23 +128,32 @@ Pane controls:
 - `Alt+Shift+h/l`, `Alt+Shift+Left/Right`, or horizontal wheel events scroll
   it horizontally.
 - `Alt+w` cycles `symbols`, `words`, and `horizontal` content presentation.
+- `Alt+n` creates a pane after the focused pane.
 - `Alt+Shift+k/j` or `Alt+Shift+Up/Down` reorders the focused pane within its column.
 
 Control mode:
 
+- `h/j/k/l` or arrows moves focus.
 - `z` toggles pane zoom.
 - `n` creates a pane after the focused pane.
 - `c` creates a column after the focused column.
-- `[` / `]` or `,` / `.` moves the focused pane to the previous or next column.
+- `Shift+h/l`, `[` / `]`, or `,` / `.` moves the focused pane to the previous
+  or next column.
 - `{` / `}` moves the focused column left or right.
-- `j` or `+` grows the focused pane in `fit` layout.
-- `k` or `-` shrinks the focused pane in `fit` layout.
-- `h` and `l` resize the focused column.
+- `r` enters resize mode.
 - `m` cycles layout mode, and `w` cycles content presentation.
 - `0` or `b` resets the focused column's space: column width, pane weights,
   and zoom.
 - `s` saves the current session immediately.
 - `Esc` or `p` exits control mode without applying another action.
+
+Resize mode:
+
+- `j`, `Down`, `+`, or `=` grows the focused pane in `fit` layout.
+- `k`, `Up`, or `-` shrinks the focused pane in `fit` layout.
+- `h` / `Left` shrinks the focused column, and `l` / `Right` grows it.
+- `0` or `b` resets the focused column's space.
+- `Esc`, `r`, or `p` exits resize mode.
 
 `fit` is a vertical stack. `tabs` shows only the selected pane. `carousel`
 shows the selected pane with compact neighboring previews. Pane selection is
@@ -138,13 +161,19 @@ remembered independently for each column.
 
 ## Sessions and diagnostics
 
-When you run with `--session`, TB2D autosaves every 5 seconds and once more on
+When you run with `--session`, tb2d autosaves every 5 seconds and once more on
 exit. The saved session remembers the template path, focus, viewport offset,
 runtime workspace shape, column width overrides, selected pane per column,
 runtime layout modes, fit pane weights, zoomed pane, and pane scroll positions.
 Runtime workspace shape includes columns and panes created from control mode.
 Passing a new `--template` starts from that YAML again and replaces the saved
 runtime workspace snapshot on the next save.
+
+When there is no explicit `--template` and no remembered template in the
+session, tb2d uses the editable default config at
+`${XDG_CONFIG_HOME:-$HOME/.config}/tb2d/default.yaml`. Existing sessions keep
+their saved runtime workspace until you replace them with `--template` or edit
+the saved session state.
 
 Session state is written under the platform state directory as
 `tb2d/<session>.json`. Runtime diagnostics are written next to it as
@@ -201,7 +230,8 @@ python3 scripts/package-release.py \
 
 ## Workspace YAML
 
-Each column has a name, width, optional `fit`, `tabs`, or `carousel` layout,
+Use `tb2d --config` for the quickest way to open the default YAML. Each column
+has a name, width, optional `fit`, `tabs`, or `carousel` layout,
 and one or more panes. Widths support cell counts, the `small`, `medium`, and
 `big` presets, custom presets, and percentages with optional clamps such as
 `"55% min=42 max=72"`.
@@ -236,7 +266,21 @@ columns:
         command: "${SHELL:-sh}"
 ```
 
-TB2D uses PTYs with a `vt100` parser. It resizes pane terminals with the
+Pane commands run through `sh -lc`, so startup commands can be embedded per
+pane:
+
+```yaml
+panes:
+  - name: server
+    command: "cd ~/project && npm run dev"
+  - name: shell
+    command: "cd ~/project && git status; exec ${SHELL:-sh}"
+```
+
+End with `exec ${SHELL:-sh}` when you want the pane to stay open after a setup
+command finishes.
+
+tb2d uses PTYs with a `vt100` parser. It resizes pane terminals with the
 workspace, renders ANSI colors and common text attributes, preserves wide
 character layout, and handles common full-screen terminal applications. It is
 still intentionally lighter than a complete terminal emulator: application

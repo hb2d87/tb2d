@@ -3,16 +3,17 @@ set -eu
 
 repo="${TB2D_REPO:-hb2d87/tb2d}"
 install_dir="${TB2D_INSTALL_DIR:-$HOME/.local/bin}"
+config_dir="${TB2D_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/tb2d}"
 version="${TB2D_VERSION:-latest}"
 path_update="${TB2D_PATH_UPDATE:-auto}"
 
 usage() {
   cat <<'EOF'
-Install the latest TB2D release binary.
+Install the latest tb2d release binary and starter YAML config.
 
-Usage: install.sh [--repo OWNER/REPO] [--version vX.Y.Z] [--install-dir PATH] [--no-path-update]
+Usage: install.sh [--repo OWNER/REPO] [--version vX.Y.Z] [--install-dir PATH] [--config-dir PATH] [--no-path-update]
 
-Environment overrides: TB2D_REPO, TB2D_VERSION, TB2D_INSTALL_DIR, TB2D_PATH_UPDATE
+Environment overrides: TB2D_REPO, TB2D_VERSION, TB2D_INSTALL_DIR, TB2D_CONFIG_DIR, TB2D_PATH_UPDATE
 EOF
 }
 
@@ -27,7 +28,7 @@ profile_path() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --repo|--version|--install-dir)
+    --repo|--version|--install-dir|--config-dir)
       if [ "$#" -lt 2 ]; then
         printf 'error: %s requires a value\n' "$1" >&2
         exit 2
@@ -36,6 +37,7 @@ while [ "$#" -gt 0 ]; do
         --repo) repo="$2" ;;
         --version) version="$2" ;;
         --install-dir) install_dir="$2" ;;
+        --config-dir) config_dir="$2" ;;
       esac
       shift 2
       ;;
@@ -75,8 +77,17 @@ tar -xzf "$tmp_dir/$archive" -C "$tmp_dir"
 mkdir -p "$install_dir"
 cp "$tmp_dir/tb2d-$version-$platform/tb2d" "$install_dir/tb2d"
 chmod +x "$install_dir/tb2d"
+mkdir -p "$config_dir"
+if [ ! -f "$config_dir/default.yaml" ]; then
+  cp "$tmp_dir/tb2d-$version-$platform/default.yaml" "$config_dir/default.yaml"
+fi
+if [ ! -f "$config_dir/web-reader.yaml" ]; then
+  cp "$tmp_dir/tb2d-$version-$platform/web-reader.yaml" "$config_dir/web-reader.yaml"
+fi
 
 printf 'Installed tb2d to %s/tb2d\n' "$install_dir"
+printf 'Installed starter YAML configs to %s\n' "$config_dir"
+printf 'Edit the default config with: tb2d --config\n'
 case ":$PATH:" in
   *":$install_dir:"*) ;;
   *)
