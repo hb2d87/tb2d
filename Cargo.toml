@@ -1,6 +1,6 @@
 [package]
 name = "tb2d"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["hb2d <hb2d87@gmail.com>"]
 description = "A spatial terminal workspace manager"

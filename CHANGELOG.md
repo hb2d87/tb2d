@@ -2,7 +2,7 @@
 
 All notable changes to tb2d will be documented in this file.
 
-## Unreleased
+## 0.1.2 - 2026-06-04
 
 - Added Zellij-inspired live/control/resize hotkey layers, including direct
   `Alt+n` pane creation, `Alt+c` column creation, `Alt+r` resize mode, and
