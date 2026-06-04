@@ -24,8 +24,7 @@ Highlights:
   layout changes, and manual saves.
 - Named sessions with autosave, restored runtime workspace shape, per-pane
   scroll state, diagnostics, and panic logs.
-- Release archives and a curl-based installer for Linux x86_64 and Apple
-  Silicon macOS.
+- A curl-based installer for Linux x86_64 and Apple Silicon macOS.
 
 See [CHANGELOG.md](CHANGELOG.md) for release notes and [LICENSE](LICENSE) for
 license terms.
@@ -36,28 +35,17 @@ license terms.
 
 ## Install
 
-Install the latest Linux x86_64 or Apple Silicon macOS release to
-`~/.local/bin/tb2d`:
+Install the latest release:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh | sh
 ```
 
-The installer accepts `--version`, `--install-dir`, `--config-dir`, and `--repo`
-options. For example, install a specific release into a custom directory:
+The installer puts `tb2d` in `~/.local/bin`, adds that directory to your shell
+profile if needed, and installs starter YAML configs to
+`${XDG_CONFIG_HOME:-$HOME/.config}/tb2d` without overwriting edits.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh |
-  sh -s -- --version v0.1.0 --install-dir "$HOME/bin"
-```
-
-If the install directory is not already on your `PATH`, the installer adds it
-to your shell profile and prints the one-line `export PATH=...` command for the
-current terminal. It also installs starter YAML configs to
-`${XDG_CONFIG_HOME:-$HOME/.config}/tb2d` without overwriting existing files.
-Pass `--no-path-update` to skip profile changes.
-
-For local development, build and install the same `tb2d` command with Cargo:
+To build from source instead:
 
 ```bash
 cargo install --path .
@@ -185,48 +173,6 @@ start/stop breadcrumbs, workspace load failures, terminal event read/poll
 errors, autosave failures, scroll bursts, frame event caps, and panic
 backtraces. If the UI disappears without an obvious terminal error, check this
 file first.
-
-## Release archives
-
-Release archives remain usable without the installer:
-
-```bash
-tar -xzf tb2d-vX.Y.Z-linux-x86_64.tar.gz
-./tb2d-vX.Y.Z-linux-x86_64/tb2d
-```
-
-## Publish a release
-
-The GitHub release workflow builds Linux x86_64 and Apple Silicon macOS
-archives when a `v*` tag is pushed:
-
-```bash
-git tag v0.1.0
-git push origin master v0.1.0
-```
-
-If this is a fresh GitHub repository, add the remote first:
-
-```bash
-git remote add origin git@github.com:hb2d87/tb2d.git
-git push -u origin master
-```
-
-## Development checks
-
-Before opening a PR, run the same checks used by CI:
-
-```bash
-cargo test --locked --lib
-cargo build --locked --release
-sh -n scripts/install.sh
-python3 -m py_compile scripts/package-release.py
-python3 scripts/package-release.py \
-  --binary target/release/tb2d \
-  --out-dir dist \
-  --version ci \
-  --platform linux-x86_64
-```
 
 ## Workspace YAML
 
