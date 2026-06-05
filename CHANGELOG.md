@@ -4,6 +4,14 @@ All notable changes to tb2d will be documented in this file.
 
 ## Unreleased
 
+## 0.1.3 - 2026-06-05
+
+- Fixed deep vertical scrolling so panes with more history than one screen can
+  scroll through the full terminal buffer.
+- Patched the vendored `vt100` 0.15.2 renderer to avoid panics when drawing
+  deep scrollback offsets.
+- Added `tb2d update` and `tb2d update --version vX.Y.Z` as friendly wrappers
+  around the official installer.
 - Simplified the README for first-time users by trimming maintainer-focused
   release/development instructions and adding update/uninstall guidance.
 

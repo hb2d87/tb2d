@@ -36,6 +36,10 @@ fn main() -> Result<()> {
             open_editor(&path)?;
             return Ok(());
         }
+        ParseOutcome::Update { version } => {
+            run_update(version)?;
+            return Ok(());
+        }
     };
     let session_name = cli.session.clone();
     let store = SessionStore::new(cli.session);
@@ -146,6 +150,27 @@ fn open_editor(path: &Path) -> Result<()> {
         .with_context(|| format!("failed to open editor for {}", path.display()))?;
     if !status.success() {
         anyhow::bail!("editor exited with status {status}");
+    }
+    Ok(())
+}
+
+fn run_update(version: Option<String>) -> Result<()> {
+    let mut args = Vec::new();
+    if let Some(version) = version {
+        args.push("--version".to_owned());
+        args.push(version);
+    }
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg(
+            "curl -fsSL https://raw.githubusercontent.com/hb2d87/tb2d/master/scripts/install.sh | sh -s -- \"$@\"",
+        )
+        .arg("tb2d-update")
+        .args(args)
+        .status()
+        .context("failed to run tb2d updater; install curl and sh or rerun the README install command")?;
+    if !status.success() {
+        anyhow::bail!("tb2d updater exited with status {status}");
     }
     Ok(())
 }

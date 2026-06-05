@@ -15,6 +15,7 @@ pub enum ParseOutcome {
     Run(Cli),
     EditConfig,
     PrintConfigPath,
+    Update { version: Option<String> },
     Help,
     Version,
 }
@@ -37,6 +38,7 @@ impl Cli {
         while let Some(arg) = args.next() {
             let arg = arg.to_string_lossy();
             match arg.as_ref() {
+                "update" => return parse_update(args),
                 "-h" | "--help" => return Ok(ParseOutcome::Help),
                 "-V" | "--version" => return Ok(ParseOutcome::Version),
                 "--config" => {
@@ -87,12 +89,15 @@ impl Cli {
 
 Usage: tb2d [--template <workspace.yaml>] [--session <name>]
        tb2d --config
+       tb2d update [--version vX.Y.Z]
 
 Options:
   --config          Create/open the user workspace YAML in $VISUAL or $EDITOR
   --config-path     Print the user workspace YAML path
   --template <path>  Start from a workspace template
   --session <name>   Restore and save runtime state (default: main)
+  update             Install the latest release with the official installer
+  update --version   Install a specific release tag
   -h, --help         Print help
   -V, --version      Print version
 
@@ -111,6 +116,41 @@ fn set_template(template: &mut Option<PathBuf>, path: PathBuf) -> Result<()> {
 fn set_config_action(action: &mut Option<ParseOutcome>, value: ParseOutcome) -> Result<()> {
     if action.replace(value).is_some() {
         bail!("config action was provided more than once");
+    }
+    Ok(())
+}
+
+fn parse_update<I>(args: I) -> Result<ParseOutcome>
+where
+    I: Iterator<Item = OsString>,
+{
+    let mut version = None;
+    let mut args = args;
+    while let Some(arg) = args.next() {
+        let arg = arg.to_string_lossy();
+        match arg.as_ref() {
+            "--version" => {
+                let Some(value) = args.next() else {
+                    bail!("update --version requires a release tag");
+                };
+                set_update_version(&mut version, value.to_string_lossy().into_owned())?;
+            }
+            value if value.starts_with("--version=") => {
+                set_update_version(&mut version, value[10..].to_owned())?;
+            }
+            "-h" | "--help" => return Ok(ParseOutcome::Help),
+            value => bail!("unknown update option {value:?}; run tb2d --help for usage"),
+        }
+    }
+    Ok(ParseOutcome::Update { version })
+}
+
+fn set_update_version(version: &mut Option<String>, value: String) -> Result<()> {
+    if value.is_empty() {
+        bail!("update --version requires a non-empty release tag");
+    }
+    if version.replace(value).is_some() {
+        bail!("update version was provided more than once");
     }
     Ok(())
 }
@@ -160,10 +200,28 @@ mod tests {
     }
 
     #[test]
+    fn parses_update_action() {
+        assert_eq!(
+            Cli::parse_from(["update"]).unwrap(),
+            ParseOutcome::Update { version: None }
+        );
+        assert_eq!(
+            Cli::parse_from(["update", "--version", "v0.1.3"]).unwrap(),
+            ParseOutcome::Update { version: Some("v0.1.3".into()) }
+        );
+        assert_eq!(
+            Cli::parse_from(["update", "--version=v0.1.3"]).unwrap(),
+            ParseOutcome::Update { version: Some("v0.1.3".into()) }
+        );
+    }
+
+    #[test]
     fn rejects_unknown_or_incomplete_options() {
         assert!(Cli::parse_from(["--wat"]).is_err());
         assert!(Cli::parse_from(["--template"]).is_err());
         assert!(Cli::parse_from(["--session"]).is_err());
         assert!(Cli::parse_from(["one.yaml", "two.yaml"]).is_err());
+        assert!(Cli::parse_from(["update", "--wat"]).is_err());
+        assert!(Cli::parse_from(["update", "--version"]).is_err());
     }
 }

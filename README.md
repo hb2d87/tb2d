@@ -51,7 +51,14 @@ Open a new terminal after install, then run:
 tb2d
 ```
 
-Update later by running the same install command again.
+Update later with:
+
+```bash
+tb2d update
+```
+
+You can also rerun the install command, or install a specific release with
+`tb2d update --version v0.1.3`.
 
 Remove the app:
 
