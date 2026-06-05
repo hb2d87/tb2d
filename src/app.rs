@@ -401,7 +401,7 @@ impl App {
         }
         let pane = self.panes.get_mut(&self.focused_pane_id());
         let Some(pane) = pane else { return };
-        let scrollback_max = pane.scrollback_max.min(visible_row_limit(pane));
+        let scrollback_max = terminal_scrollback_max(pane);
         pane.scrollback_max = scrollback_max;
         match direction {
             Direction::Up => {
@@ -438,9 +438,7 @@ impl App {
             }
         }
         pane.view.vertical = pane.view.vertical.min(scrollback_max);
-        pane.terminal.set_scrollback(pane.view.vertical);
-        pane.view.vertical = pane.terminal.screen().scrollback().min(scrollback_max);
-        pane.terminal.set_scrollback(pane.view.vertical);
+        pane.view.vertical = set_terminal_scrollback(pane, pane.view.vertical);
     }
 
     pub fn cycle_focused_presentation(&mut self) {
@@ -787,20 +785,22 @@ fn animate_towards(current: u16, target: u16) -> u16 {
 
 fn refresh_scrollback(pane: &mut PaneRuntime) {
     let vertical = pane.view.vertical;
-    pane.terminal.set_scrollback(usize::MAX);
-    // vt100 can store deeper history than Screen::cell can render safely from;
-    // keep the live offset inside the visible-row window to avoid Grid underflow.
-    pane.scrollback_max = pane
-        .terminal
-        .screen()
-        .scrollback()
-        .min(visible_row_limit(pane));
+    pane.scrollback_max = terminal_scrollback_max(pane);
     pane.view.vertical = vertical.min(pane.scrollback_max);
-    pane.terminal.set_scrollback(pane.view.vertical);
+    pane.view.vertical = set_terminal_scrollback(pane, pane.view.vertical);
 }
 
-fn visible_row_limit(pane: &PaneRuntime) -> usize {
-    usize::from(pane.terminal.screen().size().0)
+fn terminal_scrollback_max(pane: &mut PaneRuntime) -> usize {
+    let vertical = pane.view.vertical;
+    pane.terminal.set_scrollback(usize::MAX);
+    let max = pane.terminal.screen().scrollback();
+    pane.terminal.set_scrollback(vertical.min(max));
+    max
+}
+
+fn set_terminal_scrollback(pane: &mut PaneRuntime, vertical: usize) -> usize {
+    pane.terminal.set_scrollback(vertical);
+    pane.terminal.screen().scrollback()
 }
 
 fn weighted_fit_pane_rects(
@@ -1401,6 +1401,41 @@ mod tests {
     }
 
     #[test]
+    fn refreshed_scrollback_keeps_full_terminal_history_reachable() {
+        let workspace = Workspace::parse(
+            "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n",
+        )
+        .unwrap();
+        let mut app = App::new(workspace, SessionState::default()).unwrap();
+        let mut terminal = vt100::Parser::new(2, 8, SCROLLBACK_LINES);
+        terminal.process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\nseven");
+        terminal.set_scrollback(usize::MAX);
+        let full_scrollback = terminal.screen().scrollback();
+        assert!(full_scrollback > usize::from(terminal.screen().size().0));
+        terminal.set_scrollback(0);
+        let mut pane = PaneRuntime {
+            id: pane_id(0, 0),
+            name: "a".to_owned(),
+            command: "sh".to_owned(),
+            terminal,
+            exited: false,
+            view: PaneViewState::default(),
+            scrollback_max: 0,
+        };
+        refresh_scrollback(&mut pane);
+        assert_eq!(pane.scrollback_max, full_scrollback);
+        app.panes.insert(pane_id(0, 0), pane);
+
+        for _ in 0..1_000 {
+            app.scroll_focused_pane(Direction::Up);
+        }
+
+        let pane = &app.panes[&pane_id(0, 0)];
+        assert_eq!(pane.view.vertical, full_scrollback);
+        assert_eq!(pane.terminal.screen().scrollback(), full_scrollback);
+    }
+
+    #[test]
     fn vertical_scroll_keeps_vt100_cell_rendering_in_safe_bounds() {
         let workspace = Workspace::parse(
             "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n",
@@ -1428,7 +1463,7 @@ mod tests {
         }
 
         let pane = &app.panes[&pane_id(0, 0)];
-        assert_eq!(pane.view.vertical, usize::from(pane.terminal.screen().size().0));
+        assert_eq!(pane.view.vertical, full_scrollback);
         assert_eq!(pane.terminal.screen().scrollback(), pane.view.vertical);
         let _ = pane.terminal.screen().cell(0, 0);
     }

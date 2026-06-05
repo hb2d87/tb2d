@@ -25,3 +25,8 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 vt100 = "0.15"
+
+[patch.crates-io]
+# vt100 0.15.2 can panic while rendering deep scrollback offsets; keep this
+# local patch until the upstream visible_rows fix is available from crates.io.
+vt100 = { path = "vendor/vt100" }
