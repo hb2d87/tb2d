@@ -12,11 +12,9 @@ use std::{collections::HashMap, path::PathBuf};
 use tracing::warn;
 
 const SCROLLBACK_LINES: usize = 1_000;
-pub const MAX_HORIZONTAL_SCROLL: u16 = 512;
 const MIN_COLUMN_WIDTH: u16 = 12;
 const COLUMN_RESIZE_STEP: u16 = 4;
 const VERTICAL_SCROLL_STEP: usize = 3;
-const HORIZONTAL_SCROLL_STEP: u16 = 4;
 const PANE_WEIGHT_STEP: u16 = 1;
 const MAX_PANE_WEIGHT: u16 = 24;
 const TEMP_PANE_ID: PaneId = usize::MAX;
@@ -43,6 +41,8 @@ pub enum PresentationMode {
     #[default]
     Symbols,
     Words,
+    // Kept only so older saved sessions can deserialize. New UI cycles between
+    // symbols and wrapped words because pane content now wraps at pane width.
     Horizontal,
 }
 
@@ -50,8 +50,7 @@ impl PresentationMode {
     pub fn next(self) -> Self {
         match self {
             Self::Symbols => Self::Words,
-            Self::Words => Self::Horizontal,
-            Self::Horizontal => Self::Symbols,
+            Self::Words | Self::Horizontal => Self::Symbols,
         }
     }
 
@@ -59,7 +58,7 @@ impl PresentationMode {
         match self {
             Self::Symbols => "symbols",
             Self::Words => "words",
-            Self::Horizontal => "horizontal",
+            Self::Horizontal => "symbols",
         }
     }
 }
@@ -417,25 +416,7 @@ impl App {
                     .vertical
                     .saturating_sub(VERTICAL_SCROLL_STEP.saturating_mul(steps));
             }
-            Direction::Left => {
-                pane.view.presentation = PresentationMode::Horizontal;
-                pane.view.horizontal = pane
-                    .view
-                    .horizontal
-                    .saturating_sub(
-                        HORIZONTAL_SCROLL_STEP.saturating_mul(steps.min(u16::MAX as usize) as u16),
-                    );
-            }
-            Direction::Right => {
-                pane.view.presentation = PresentationMode::Horizontal;
-                pane.view.horizontal = pane
-                    .view
-                    .horizontal
-                    .saturating_add(
-                        HORIZONTAL_SCROLL_STEP.saturating_mul(steps.min(u16::MAX as usize) as u16),
-                    )
-                    .min(MAX_HORIZONTAL_SCROLL);
-            }
+            Direction::Left | Direction::Right => {}
         }
         pane.view.vertical = pane.view.vertical.min(scrollback_max);
         pane.view.vertical = set_terminal_scrollback(pane, pane.view.vertical);
@@ -727,16 +708,7 @@ impl App {
                     continue;
                 }
                 let id = pane_id(column.index, pane);
-                let cols = rect
-                    .width
-                    .saturating_sub(2)
-                    .saturating_add(
-                        self.panes
-                            .get(&id)
-                            .map(|pane| pane.view.horizontal)
-                            .unwrap_or_default(),
-                    )
-                    .max(1);
+                let cols = rect.width.saturating_sub(2).max(1);
                 let rows = rect.height.saturating_sub(2).max(1);
                 if let Err(error) = self.ptys.resize(id, cols, rows) {
                     warn!(%error, "failed to resize PTY");
@@ -919,7 +891,10 @@ fn normalize_pane_views(workspace: &Workspace, restored: Vec<Vec<PaneViewState>>
                         .and_then(|panes| panes.get(pane_index))
                         .copied()
                         .unwrap_or_default();
-                    view.horizontal = view.horizontal.min(MAX_HORIZONTAL_SCROLL);
+                    view.horizontal = 0;
+                    if matches!(view.presentation, PresentationMode::Horizontal) {
+                        view.presentation = PresentationMode::Words;
+                    }
                     view
                 })
                 .collect()
@@ -1363,8 +1338,8 @@ mod tests {
         app.scroll_focused_pane(Direction::Up);
         assert_eq!(app.panes[&pane_id(0, 0)].view.vertical, 2);
         app.scroll_focused_pane(Direction::Right);
-        assert_eq!(app.panes[&pane_id(0, 0)].view.horizontal, 4);
-        assert_eq!(app.panes[&pane_id(0, 0)].view.presentation, PresentationMode::Horizontal);
+        assert_eq!(app.panes[&pane_id(0, 0)].view.horizontal, 0);
+        assert_eq!(app.panes[&pane_id(0, 0)].view.presentation, PresentationMode::Symbols);
         app.scroll_focused_pane(Direction::Down);
         assert_eq!(app.panes[&pane_id(0, 0)].view.vertical, 0);
     }
@@ -1469,7 +1444,7 @@ mod tests {
     }
 
     #[test]
-    fn horizontal_scroll_is_bounded_to_keep_parser_resize_stable() {
+    fn horizontal_scroll_is_ignored_so_pane_content_wraps() {
         let workspace = Workspace::parse(
             "columns:\n  - name: one\n    width: 40\n    panes:\n      - name: a\n",
         )
@@ -1487,7 +1462,11 @@ mod tests {
         for _ in 0..1_000 {
             app.scroll_focused_pane(Direction::Right);
         }
-        assert_eq!(app.panes[&pane_id(0, 0)].view.horizontal, MAX_HORIZONTAL_SCROLL);
+        let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
+        app.resize_panes(&layout);
+        assert_eq!(app.panes[&pane_id(0, 0)].view.horizontal, 0);
+        assert_eq!(app.panes[&pane_id(0, 0)].view.presentation, PresentationMode::Symbols);
+        assert_eq!(app.panes[&pane_id(0, 0)].terminal.screen().size(), (18, 38));
     }
 
     #[test]
@@ -1541,7 +1520,11 @@ mod tests {
         assert_eq!(app.zoomed, Some(FocusRef { column: 0, pane: 1 }));
         let layout = Layout::calculate(&app.workspace, 80, 20).unwrap();
         app.start_panes(&layout).unwrap();
-        let normalized_view = PaneViewState { horizontal: MAX_HORIZONTAL_SCROLL, ..restored_view };
+        let normalized_view = PaneViewState {
+            horizontal: 0,
+            presentation: PresentationMode::Words,
+            ..restored_view
+        };
         assert_eq!(app.panes[&pane_id(0, 1)].view, normalized_view);
         assert_eq!(app.session_state().pane_selections, vec![1]);
         assert_eq!(app.session_state().pane_views[0][1], normalized_view);

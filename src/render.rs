@@ -1,5 +1,5 @@
 use crate::{
-    app::{pane_id, App, AppMode, PresentationMode, MAX_HORIZONTAL_SCROLL},
+    app::{pane_id, App, AppMode, PresentationMode},
     layout::Layout,
 };
 use ratatui::{
@@ -35,7 +35,7 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &Layout) {
                 ));
             let visible_lines = screen_rect.height.saturating_sub(2);
             let clipped_left = app.viewport.offset.saturating_sub(canvas_rect.x);
-            let content_start = clipped_left.saturating_sub(1).saturating_add(pane.view.horizontal);
+            let content_start = clipped_left.saturating_sub(1);
             let show_scrollbars = focused && !app.is_collapsed_carousel_pane(column.index, pane_index);
             let content_width = screen_rect.width.saturating_sub(2);
             let paragraph = if app.is_collapsed_carousel_pane(column.index, pane_index) {
@@ -56,7 +56,7 @@ pub fn draw(frame: &mut Frame, app: &App, layout: &Layout) {
             };
             frame.render_widget(paragraph, screen_rect);
             if show_scrollbars {
-                draw_pane_scrollbars(frame, app, pane, screen_rect, visible_lines, content_width);
+                draw_pane_scrollbar(frame, app, pane, screen_rect, visible_lines);
             }
         }
     }
@@ -112,13 +112,12 @@ fn pane_history(app: &App, column_index: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn draw_pane_scrollbars(
+fn draw_pane_scrollbar(
     frame: &mut Frame,
     app: &App,
     pane: &crate::app::PaneRuntime,
     area: Rect,
     visible_lines: u16,
-    content_width: u16,
 ) {
     if area.width < 4 || area.height < 4 {
         return;
@@ -142,23 +141,6 @@ fn draw_pane_scrollbars(
         pane.scrollback_max.saturating_add(visible_lines as usize),
         visible_lines as usize,
         pane.scrollback_max.saturating_sub(pane.view.vertical),
-    );
-
-    let horizontal_x = area.x + 1;
-    let horizontal_y = area.y + area.height - 1;
-    let horizontal_len = area.width.saturating_sub(2);
-    draw_thumb(
-        frame,
-        horizontal_x,
-        horizontal_y,
-        1,
-        0,
-        horizontal_len,
-        "━",
-        thumb,
-        MAX_HORIZONTAL_SCROLL as usize + content_width as usize,
-        content_width as usize,
-        pane.view.horizontal as usize,
     );
 }
 
@@ -320,7 +302,7 @@ fn draw_control_overlay(frame: &mut Frame, app: &App) {
         Line::from("  { / } move column"),
         Line::from(""),
         Line::from("Column and View"),
-        Line::from("  r resize mode   z zoom pane        m layout    w presentation"),
+        Line::from("  r resize mode   z zoom pane        m layout    w wrap style"),
         Line::from("  0 / b reset focused space"),
         Line::from(""),
         Line::from("Session"),

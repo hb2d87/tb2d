@@ -54,7 +54,7 @@ pub enum ResizeAction {
     Ignore,
 }
 
-pub fn map_key(event: KeyEvent) -> Action {
+pub fn map_key(event: KeyEvent, application_cursor: bool) -> Action {
     if event.modifiers.contains(KeyModifiers::CONTROL) && event.code == KeyCode::Char('q') {
         return Action::Quit;
     }
@@ -85,7 +85,7 @@ pub fn map_key(event: KeyEvent) -> Action {
             };
             return direction
                 .map(|direction| match direction {
-                    Direction::Left | Direction::Right => Action::ScrollPane(direction),
+                    Direction::Left | Direction::Right => Action::Ignore,
                     Direction::Up | Direction::Down => Action::ReorderPane(direction),
                 })
                 .unwrap_or(Action::Ignore);
@@ -101,7 +101,7 @@ pub fn map_key(event: KeyEvent) -> Action {
             return Action::Move(direction);
         }
     }
-    encode_key(event).map(Action::Send).unwrap_or(Action::Ignore)
+    encode_key(event, application_cursor).map(Action::Send).unwrap_or(Action::Ignore)
 }
 
 pub fn map_control_key(event: KeyEvent) -> ControlAction {
@@ -158,7 +158,10 @@ pub fn map_resize_key(event: KeyEvent) -> ResizeAction {
     }
 }
 
-fn encode_key(event: KeyEvent) -> Option<Vec<u8>> {
+fn encode_key(event: KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
+    let cursor = |normal: &'static [u8], application: &'static [u8]| {
+        if application_cursor { application } else { normal }.to_vec()
+    };
     let bytes = match event.code {
         KeyCode::Char(character) if event.modifiers.contains(KeyModifiers::CONTROL) => {
             vec![(character.to_ascii_lowercase() as u8).saturating_sub(b'a') + 1]
@@ -171,18 +174,42 @@ fn encode_key(event: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Char(character) => character.to_string().into_bytes(),
         KeyCode::Enter => b"\r".to_vec(),
         KeyCode::Tab => b"\t".to_vec(),
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Esc => vec![0x1b],
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Left => cursor(b"\x1b[D", b"\x1bOD"),
+        KeyCode::Right => cursor(b"\x1b[C", b"\x1bOC"),
+        KeyCode::Up => cursor(b"\x1b[A", b"\x1bOA"),
+        KeyCode::Down => cursor(b"\x1b[B", b"\x1bOB"),
         KeyCode::Home => b"\x1b[H".to_vec(),
         KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::Insert => b"\x1b[2~".to_vec(),
         KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::PageUp => b"\x1b[5~".to_vec(),
+        KeyCode::PageDown => b"\x1b[6~".to_vec(),
+        KeyCode::F(number) => function_key(number)?,
         _ => return None,
     };
     Some(bytes)
+}
+
+fn function_key(number: u8) -> Option<Vec<u8>> {
+    let bytes = match number {
+        1 => b"\x1bOP".as_slice(),
+        2 => b"\x1bOQ",
+        3 => b"\x1bOR",
+        4 => b"\x1bOS",
+        5 => b"\x1b[15~",
+        6 => b"\x1b[17~",
+        7 => b"\x1b[18~",
+        8 => b"\x1b[19~",
+        9 => b"\x1b[20~",
+        10 => b"\x1b[21~",
+        11 => b"\x1b[23~",
+        12 => b"\x1b[24~",
+        _ => return None,
+    };
+    Some(bytes.to_vec())
 }
 
 #[cfg(test)]
@@ -192,72 +219,116 @@ mod tests {
     #[test]
     fn maps_navigation_and_regular_input() {
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT), false),
             Action::Move(Direction::Left)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT), false),
             Action::Move(Direction::Left)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT), false),
             Action::Move(Direction::Right)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT), false),
             Action::Move(Direction::Up)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT), false),
             Action::Move(Direction::Down)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+            map_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), false),
             Action::Send(b"x".to_vec())
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT), false),
             Action::Send(b"\x1bx".to_vec())
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::ALT), false),
             Action::ResizeColumn(true)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::ALT), false),
             Action::ResetColumnWidth
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::ALT), false),
             Action::ScrollPane(Direction::Up)
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::ALT), false),
             Action::ToggleZoom
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT), false),
             Action::EnterControlMode
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::ALT), false),
             Action::EnterResizeMode
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::ALT), false),
             Action::AddPane
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::ALT), false),
             Action::AddColumn
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT)),
+            map_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT), false),
             Action::SaveSession
         );
         assert_eq!(
-            map_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT | KeyModifiers::SHIFT)),
+            map_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT | KeyModifiers::SHIFT), false),
             Action::ReorderPane(Direction::Down)
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::ALT | KeyModifiers::SHIFT), false),
+            Action::Ignore
+        );
+    }
+
+    #[test]
+    fn maps_plain_arrows_for_normal_and_application_cursor_modes() {
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), false),
+            Action::Send(b"\x1b[B".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), true),
+            Action::Send(b"\x1bOB".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), true),
+            Action::Send(b"\x1bOA".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), true),
+            Action::Send(b"\x1bOC".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), true),
+            Action::Send(b"\x1bOD".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE), false),
+            Action::Send(b"\x1b[5~".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), false),
+            Action::Send(b"\x1b[6~".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::Insert, KeyModifiers::NONE), false),
+            Action::Send(b"\x1b[2~".to_vec())
+        );
+        assert_eq!(
+            map_key(KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE), false),
+            Action::Send(b"\x1b[15~".to_vec())
         );
     }
 

@@ -134,7 +134,7 @@ fn handle_event(
             handle_resize_action(app, layout, map_resize_key(key));
         }
         Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-            match map_key(key) {
+            match map_key(key, focused_application_cursor(app)) {
                 Action::Quit => app.should_quit = true,
                 Action::EnterControlMode => app.enter_control_mode(),
                 Action::EnterResizeMode => app.enter_resize_mode(),
@@ -162,16 +162,19 @@ fn handle_event(
         Event::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollDown => {
             pending_scroll.vertical -= 1;
         }
-        Event::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollLeft => {
-            pending_scroll.horizontal -= 1;
-        }
-        Event::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollRight => {
-            pending_scroll.horizontal += 1;
-        }
+        Event::Mouse(mouse)
+            if matches!(mouse.kind, MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight) => {}
         Event::Resize(_, _) => {}
         _ => {}
     }
     Ok(())
+}
+
+fn focused_application_cursor(app: &App) -> bool {
+    app.panes
+        .get(&app.focused_pane_id())
+        .map(|pane| pane.terminal.screen().application_cursor())
+        .unwrap_or(false)
 }
 
 fn handle_control_action(
@@ -304,20 +307,18 @@ fn save_session(app: &mut App, store: &SessionStore) {
 #[derive(Debug, Default)]
 struct PendingScroll {
     vertical: i32,
-    horizontal: i32,
 }
 
 impl PendingScroll {
     fn apply(self, app: &mut App, store: &SessionStore, events_read: usize) {
         // Touchpads can emit a burst of wheel events in one frame; coalesce them
         // into one app scroll update so rendering and diagnostics stay stable.
-        if self.vertical != 0 || self.horizontal != 0 {
+        if self.vertical != 0 {
             note(
                 store,
                 "scroll-burst",
                 &[
                     ("vertical", json!(self.vertical)),
-                    ("horizontal", json!(self.horizontal)),
                     ("events_read", json!(events_read)),
                     ("focus_column", json!(app.focus.column)),
                     ("focus_pane", json!(app.focus.pane)),
@@ -330,14 +331,6 @@ impl PendingScroll {
             app.scroll_focused_pane_by(
                 crate::input::Direction::Down,
                 self.vertical.unsigned_abs() as usize,
-            );
-        }
-        if self.horizontal > 0 {
-            app.scroll_focused_pane_by(crate::input::Direction::Right, self.horizontal as usize);
-        } else if self.horizontal < 0 {
-            app.scroll_focused_pane_by(
-                crate::input::Direction::Left,
-                self.horizontal.unsigned_abs() as usize,
             );
         }
     }

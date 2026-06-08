@@ -130,9 +130,9 @@ Pane controls:
   restore the layout.
 - `Alt+PageUp` / `Alt+PageDown` or the mouse wheel scrolls the focused pane
   vertically.
-- `Alt+Shift+h/l`, `Alt+Shift+Left/Right`, or horizontal wheel events scroll
-  it horizontally.
-- `Alt+w` cycles `symbols`, `words`, and `horizontal` content presentation.
+- Long pane output wraps at the pane width instead of using horizontal pane
+  scrolling.
+- `Alt+w` cycles `symbols` and `words` wrapping styles.
 - `Alt+n` creates a pane after the focused pane.
 - `Alt+Shift+k/j` or `Alt+Shift+Up/Down` reorders the focused pane within its column.
 
@@ -146,7 +146,7 @@ Control mode:
   or next column.
 - `{` / `}` moves the focused column left or right.
 - `r` enters resize mode.
-- `m` cycles layout mode, and `w` cycles content presentation.
+- `m` cycles layout mode, and `w` cycles wrapping style.
 - `0` or `b` resets the focused column's space: column width, pane weights,
   and zoom.
 - `s` saves the current session immediately.
@@ -246,6 +246,11 @@ command finishes.
 tb2d uses PTYs with a `vt100` parser. It resizes pane terminals with the
 workspace, renders ANSI colors and common text attributes, preserves wide
 character layout, and handles common full-screen terminal applications. It is
-still intentionally lighter than a complete terminal emulator: application
-mouse forwarding, application cursor-key mode, and terminal reply plumbing are
-future improvements.
+advertised to pane commands as `TERM=xterm-256color` with
+`COLORTERM=truecolor` so TUI apps can use 256-color and truecolor output.
+Set `TB2D_PANE_TERM` before launching tb2d if you need to override the pane
+terminal name for a specific environment.
+
+tb2d is still intentionally lighter than a complete terminal emulator:
+application mouse forwarding and terminal reply plumbing are future
+improvements.

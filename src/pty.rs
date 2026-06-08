@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::{
     collections::HashMap,
+    env,
     io::{Read, Write},
     sync::mpsc::{self, Receiver, Sender},
     thread,
@@ -41,6 +42,7 @@ impl PtyManager {
             .openpty(size)
             .context("failed to open PTY")?;
         let mut builder = CommandBuilder::new("sh");
+        apply_terminal_environment(&mut builder);
         builder.arg("-lc");
         builder.arg(command);
         let child = pair.slave.spawn_command(builder)
@@ -115,6 +117,17 @@ impl PtyManager {
     }
 }
 
+fn apply_terminal_environment(builder: &mut CommandBuilder) {
+    let term = env::var("TB2D_PANE_TERM")
+        .ok()
+        .filter(|term| !term.trim().is_empty())
+        .unwrap_or_else(|| "xterm-256color".to_owned());
+    builder.env("TERM", term);
+    builder.env("COLORTERM", "truecolor");
+    builder.env("TERM_PROGRAM", "tb2d");
+    builder.env("TB2D", "1");
+}
+
 impl Default for PtyManager {
     fn default() -> Self {
         Self::new()
@@ -168,6 +181,30 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("PTY output was not received");
+    }
+
+    #[test]
+    fn pane_commands_get_a_terminal_description_for_tui_apps() {
+        let mut manager = PtyManager::new();
+        manager
+            .spawn(
+                7,
+                "printf '%s|%s|%s|%s' \"$TERM\" \"$COLORTERM\" \"$TERM_PROGRAM\" \"$TB2D\"",
+                80,
+                24,
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if let Some(PtyEvent::Output(7, output)) = manager.try_recv() {
+                assert!(
+                    String::from_utf8_lossy(&output).contains("xterm-256color|truecolor|tb2d|1")
+                );
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        panic!("PTY TERM output was not received");
     }
 
     #[test]

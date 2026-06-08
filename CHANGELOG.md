@@ -4,6 +4,15 @@ All notable changes to tb2d will be documented in this file.
 
 ## Unreleased
 
+## 0.1.4 - 2026-06-08
+
+- Removed user-facing horizontal pane scrolling. Pane output now wraps at pane
+  width, while vertical pane scrolling and horizontal column navigation remain.
+- Fixed keyboard handling for curses apps such as `nnn` by advertising
+  `TERM=xterm-256color` inside panes and honoring application cursor-key mode.
+- Added a more universal pane terminal profile with `COLORTERM=truecolor`,
+  `TERM_PROGRAM=tb2d`, `TB2D=1`, and `TB2D_PANE_TERM` override support.
+
 ## 0.1.3 - 2026-06-05
 
 - Fixed deep vertical scrolling so panes with more history than one screen can
